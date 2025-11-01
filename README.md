@@ -24,3 +24,4 @@
 
 ## TODOs
 1. Impose a max working set per encoder
+2. Replace [2]int in the tokenizer with bit-packing for faster lookups
