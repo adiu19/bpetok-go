@@ -1,9 +1,11 @@
 package tokenizer
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -34,10 +36,6 @@ type Decoder interface {
 	Feed(tokens []int) []byte
 }
 
-type bpePair struct {
-	A int32
-	B int32
-}
 
 // Tokenizer holds immutable model data derived from a BPE vocab/merges set which is safe for concurrent use.
 // Invariants we maintain:
@@ -53,25 +51,16 @@ type Tokenizer struct {
 	byteToToken [256]int
 	// pairRank[bpePair{A,B}] is the priority rank for merging token A followed by token B.
 	// bpePair value can be used as a map key because fixed-size arrays are comparable
-	pairRank map[bpePair]int
+	pairRank map[[2]int]int
 	// given two adjacent tokens (A,B), what's the merged token C
-	pairToken map[bpePair]int
+	pairToken map[2[int]]int
+	// TODO: for streaming
+	maxMergeDepth int
 }
 
 // LoadTokenizerFromFiles builds a tokenizer from vocab and merges
 // vocabPath and mergesPath are raw file paths
 func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
-	/*
-		step 1: parse vocabBytes into
-			- revVocab
-			- byteToToken
-
-		step 2: parse mergeBytes into
-			- pairRank
-			- pairToken
-
-		step 3: return tokenizer ref
-	*/
 	data, err := os.ReadFile(vocabPath)
 	if err != nil {
 		return nil, fmt.Errorf("error while reading vocab file : %w", err)
@@ -98,8 +87,72 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 	}
 	fmt.Printf("vocabs loaded, %d tokens (0..%d)\n", len(vocab), maxID)
 
-	return &Tokenizer{}, nil
+	revVocab, err := buildRevVocab(vocab, len(vocab))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build revVocab: %w", err)
+	}
 
+	byteToToken, err := buildByteToToken(revVocab)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build bytesToToken : %w", err)
+	}
+
+	// --------------------------------------------------------------------
+	// ---------------------------------------------------- onto merges now
+	// --------------------------------------------------------------------
+
+	mergesLines, err := readLines(mergesPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read mergs: %w", err)
+	}
+
+	pairRank, err := buildPairRank(mergesLines, vocab)
+	if err != nil {
+		return nil, fmt.Errorf("error while building pairRank : %w", err)
+	}
+
+	pairToken, err := buildPairToken(revVocab, pairRank)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build pairToken : %w", err)
+	}
+
+	return &Tokenizer{
+		revVocab:    revVocab,
+		byteToToken: byteToToken,
+		pairRank:    pairRank,
+		pairToken:   pairToken,
+		maxMergeDepth: 0
+	}, nil
+
+}
+
+// buildByteToToken constructs the [256]int lookup table that maps a single raw
+// byte value (0..255) to the token ID that represents exactly that byte.
+func buildByteToToken(revVocab [][]byte) ([256]int, error) {
+	var table [256]int
+
+	filled := [256]bool{}
+	for tokenID, bs := range revVocab {
+		if len(bs) == 1 {
+			b := bs[0]
+
+			if filled[b] {
+				return table, fmt.Errorf("duplicate single byte token")
+			}
+
+			table[b] = tokenID
+			filled[b] = true
+		}
+
+	}
+
+	for b := 0; b < 256; b++ {
+		if !filled[b] {
+			return table, fmt.Errorf("no token found for raw bytes %d", int(b))
+		}
+	}
+
+	return table, nil
 }
 
 // buildRevVocab takes the parsed vocab.json (tokenString -> id) and returns revVocab[id] = raw bytes for that token id.
@@ -154,14 +207,9 @@ func buildRevVocab(vocab map[string]int, vocabSize int) ([][]byte, error) {
 // extended unicode stand-ins for bytes) back into the real raw bytes that
 // token represents
 //
-// Rules (GPT-2 style):
-//   - During training/export, each raw byte 0..255 got mapped to some "printable-ish"
-//     rune sequence so it can live in JSON. That's byteEncoder.
-//   - We invert that mapping into byteDecoder: string(rune) -> original byte value.
-//   - To recover original bytes for a token string, we walk its runes.
-//     For each rune r:
-//     if string(r) is in byteDecoder: append that decoded byte
-//     else: append the UTF-8 encoding of r directly
+//	For each rune r:
+//	if string(r) is in byteDecoder: append that decoded byte
+//	else: append the UTF-8 encoding of r directly
 //
 // Why the "else" branch?
 //   - Multi-byte tokens like "the" are stored literally as 't','h','e' etc,
@@ -243,8 +291,103 @@ func buildCursedByteDecoder() map[rune]byte {
 	return byteDecoder
 }
 
-// // NewEncoder
-// func (t *Tokenizer) NewEncoder() Encoder
+// buildPairRank assigns a rank (0 being highest) to each pair of tokens in the merges dataset
+// the merges dataset comes to us as a pair of utf-8 encoded strings, which we map to token ids using vocab
+// the function also contains a validation step that ensures merges doesn't contain duplicate entries
+func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[[2]int]int, error) {
+	pairRank := make(map[[2]int]int, len(mergesLines))
 
-// // NewDocoder
-// func (t *Tokenizer) NewDocoder() Decoder
+	rank := 0
+	for _, line := range mergesLines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") { // skip this line
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid merge line %q, we want exactly two items per line", line)
+		}
+
+		leftStr := parts[0]
+		rightStr := parts[1]
+
+		leftID, ok1 := vocabMap[leftStr]
+		rightID, ok2 := vocabMap[rightStr]
+
+		if !ok1 || !ok2 {
+			return nil, fmt.Errorf("failed to find a vocab entry for an entry in merges. left: %q, right: %q", &leftStr, &rightStr)
+		}
+
+		key := [2]int{leftID, rightID}
+		if _, exists := pairRank[key]; exists {
+			return nil, fmt.Errorf("duplicate merge pair found in given merges, %v", key)
+		}
+
+		pairRank[key] = rank
+		rank++
+	}
+
+	return pairRank, nil
+}
+
+// buildPairToken builds a mapping structure that maps a pair of token ids proposed by merges rules to an output token id
+func buildPairToken(revVocab [][]byte, pairRank map[[2]int]int) (map[[2]int]int, error) {
+	// init bytesToID, which is our temporary "reverse mapping of revVocab"
+	bytesToID := make(map[string]int, len(revVocab))
+	for id, bs := range revVocab {
+		bytesToID[string(bs)] = id
+	}
+
+	pairToken := make(map[[2]int]int, len(pairRank))
+
+	for pair := range pairRank {
+		leftID := pair[0]
+		rightID := pair[1]
+
+		if leftID < 0 || leftID >= len(revVocab) ||
+			rightID < 0 || rightID >= len(revVocab) {
+			return nil, fmt.Errorf("the token id parsed from pair ranks is out of bounds leftID: %d, rightID: %d", leftID, rightID)
+		}
+
+		leftBytes := revVocab[leftID]
+		rightBytes := revVocab[rightID]
+
+		mergedBytes := make([]byte, 0, len(leftBytes)+len(rightBytes))
+		mergedBytes = append(mergedBytes, leftBytes...)
+		mergedBytes = append(mergedBytes, rightBytes...)
+
+		mergedID, ok := bytesToID[string(mergedBytes)]
+		if !ok {
+			return nil, fmt.Errorf("error mapping concatenated bytes to a valid token id based off of revVocab %s", string(mergedBytes))
+
+		}
+
+		if _, exists := pairToken[pair]; exists {
+			return nil, fmt.Errorf("duplicate pair in pairToken for %v", pair)
+		}
+
+		pairToken[pair] = mergedID
+
+	}
+
+	return pairToken, nil
+}
+
+// readLines reads a text file into []string whilst preserving order
+func readLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var out []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		out = append(out, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
