@@ -36,7 +36,6 @@ type Decoder interface {
 	Feed(tokens []int) []byte
 }
 
-
 // Tokenizer holds immutable model data derived from a BPE vocab/merges set which is safe for concurrent use.
 // Invariants we maintain:
 //   - revVocab[id] is the exact byte sequence for token ID 'id'.
@@ -53,7 +52,7 @@ type Tokenizer struct {
 	// bpePair value can be used as a map key because fixed-size arrays are comparable
 	pairRank map[[2]int]int
 	// given two adjacent tokens (A,B), what's the merged token C
-	pairToken map[2[int]]int
+	pairToken map[[2]int]int
 	// TODO: for streaming
 	maxMergeDepth int
 }
@@ -117,11 +116,11 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 	}
 
 	return &Tokenizer{
-		revVocab:    revVocab,
-		byteToToken: byteToToken,
-		pairRank:    pairRank,
-		pairToken:   pairToken,
-		maxMergeDepth: 0
+		revVocab:      revVocab,
+		byteToToken:   byteToToken,
+		pairRank:      pairRank,
+		pairToken:     pairToken,
+		maxMergeDepth: 0,
 	}, nil
 
 }
