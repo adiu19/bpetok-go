@@ -2,6 +2,7 @@ package tokenizer
 
 import (
 	"bufio"
+	"container/heap"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -314,7 +315,7 @@ func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[[2]int]in
 		rightID, ok2 := vocabMap[rightStr]
 
 		if !ok1 || !ok2 {
-			return nil, fmt.Errorf("failed to find a vocab entry for an entry in merges. left: %q, right: %q", &leftStr, &rightStr)
+			return nil, fmt.Errorf("failed to find a vocab entry for an entry in merges. left: %v, right: %v", &leftStr, &rightStr)
 		}
 
 		key := [2]int{leftID, rightID}
@@ -390,3 +391,149 @@ func readLines(path string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// EncodeOffline takes a sequence of bytes and converts them to sequence of tokens
+func (t *Tokenizer) EncodeOffline(input []byte) []int {
+	n := len(input)
+	if n == 0 {
+		return nil
+	}
+
+	tokens := make([]int, n)
+
+	// convert the input to tokens, where each token currently represents a single byte
+	for i, b := range input {
+		tokens[i] = t.byteToToken[b]
+	}
+
+	// doubly linked-list
+	prev := make([]int, n)
+	next := make([]int, n)
+	for i := 1; i < n-1; i++ {
+		prev[i] = i - 1
+		next[i] = i + 1
+	}
+
+	// edge elements
+	prev[0] = -1
+	next[n-1] = -1
+
+	// per-slot versioning to invalidate heap entries
+	liveVersion := make([]int, n)
+
+	h := &mergeHeap{}
+	heap.Init(h)
+
+	// seed heap with all initial adjacent pairs.
+	pushIfMergeable := func(i int) {
+		j := next[i]
+		if i == -1 || j == -1 {
+			// not a valid index
+			return
+		}
+
+		a := tokens[i]
+		b := tokens[j]
+
+		if rank, ok := t.pairRank[[2]int{a, b}]; ok {
+			heap.Push(h, mergeCand{
+				rank:       rank,
+				pos:        i,
+				leftToken:  a,
+				rightToken: b,
+				verL:       liveVersion[i],
+				verR:       liveVersion[j],
+			})
+		}
+	}
+
+	// loop that fills heap with initial seed
+	for i := 0; i != -1 && next[i] != -1; i = next[i] {
+		pushIfMergeable(i)
+	}
+
+	// leftmost index (never dies; we always merge into the left slot)
+	head := 0
+
+	// while there are still entries in our heap
+	for h.Len() > 0 {
+		c := heap.Pop(h).(mergeCand)
+		i := c.pos
+		if i == -1 {
+			continue
+		}
+
+		j := next[i]
+		if j == -1 {
+			continue // no right neibhbor anymore
+		}
+
+		// stale entry since atleast one version did not match
+		if liveVersion[i] != c.verL || liveVersion[j] != c.verR {
+			continue
+		}
+
+		a := tokens[i]
+		b := tokens[j]
+
+		rankNow, ok := t.pairRank[[2]int{a, b}]
+
+		// if this entry doesn’t describe the same (a,b) pair with the same rank that it did when it was pushed — skip it
+		if !ok || rankNow != c.rank || a != c.leftToken || b != c.rightToken {
+			continue
+		}
+
+		cID := t.pairToken[[2]int{a, b}]
+		tokens[i] = cID // collapse into slot i
+
+		nj := next[j]
+		next[i] = nj
+		if nj != -1 {
+			prev[nj] = i
+		}
+
+		// mark other pointers as dead
+		prev[j], next[j] = -1, -1
+
+		liveVersion[i]++
+		liveVersion[j]++ // j died; invalidate anything mentioning it
+
+		// push this newly created token as part of a new pair back into the heap, with the previous as the first element
+		if pi := prev[i]; pi != -1 {
+			pushIfMergeable(pi)
+		}
+
+		// push this newly created token as part of a new pair back into the heap, with the new token as the first element
+		pushIfMergeable(i)
+	}
+
+	out := make([]int, 0, n)
+	for i := head; i != -1; i = next[i] {
+		out = append(out, tokens[i])
+	}
+
+	return out
+}
+
+// ------------------------------ heap structures
+type mergeCand struct {
+	rank       int // lower wins
+	pos        int // left index; lower wins on tie to enforce leftmost
+	leftToken  int
+	rightToken int
+	verL       int
+	verR       int
+}
+
+type mergeHeap []mergeCand
+
+func (h mergeHeap) Len() int { return len(h) }
+func (h mergeHeap) Less(i, j int) bool {
+	if h[i].rank != h[j].rank {
+		return h[i].rank < h[j].rank
+	}
+	return h[i].pos < h[j].pos // leftmost tie-break
+}
+func (h mergeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *mergeHeap) Push(x any)   { *h = append(*h, x.(mergeCand)) }
+func (h *mergeHeap) Pop() any     { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
