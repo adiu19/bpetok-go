@@ -26,9 +26,13 @@ test-vocab:
 	@echo "Checking vocab.json integrity.........."
 	$(GO) run ./cmd/test_vocab_load
 
-.PHONY: test
-test:
-	$(GO) test ./...
+.PHONY: test-offline
+test-offline:
+	go test -v ./internal/tokenizer -run TestOffline -count=1
+
+.PHONY: test-decode
+test-decode:
+	go test -v ./internal/tokenizer -run TestDecode -count=1
 
 # Clean build artifacts
 .PHONY: clean

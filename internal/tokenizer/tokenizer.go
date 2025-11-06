@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/bpetok/internal/utils"
 )
 
 // Encoder interface
@@ -85,7 +87,6 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 			return nil, fmt.Errorf("vocab not dense and missing %d", i)
 		}
 	}
-	fmt.Printf("vocabs loaded, %d tokens (0..%d)\n", len(vocab), maxID)
 
 	revVocab, err := buildRevVocab(vocab, len(vocab))
 	if err != nil {
@@ -392,6 +393,29 @@ func readLines(path string) ([]string, error) {
 	return out, nil
 }
 
+// Decode a given sequence of tokens to a sequence of bytes
+func (t *Tokenizer) Decode(tokens []int) []byte {
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	total := 0
+	for _, id := range tokens {
+		if id < 0 || id >= len(t.revVocab) {
+			panic("token id out of range while decoding")
+		}
+
+		total += len(t.revVocab[id])
+	}
+
+	out := make([]byte, 0, total)
+	for _, id := range tokens {
+		out = append(out, t.revVocab[id]...)
+	}
+
+	return out
+}
+
 // EncodeOffline takes a sequence of bytes and converts them to sequence of tokens
 func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	n := len(input)
@@ -409,7 +433,7 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	// doubly linked-list
 	prev := make([]int, n)
 	next := make([]int, n)
-	for i := 1; i < n-1; i++ {
+	for i := 0; i < n; i++ {
 		prev[i] = i - 1
 		next[i] = i + 1
 	}
@@ -421,7 +445,7 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	// per-slot versioning to invalidate heap entries
 	liveVersion := make([]int, n)
 
-	h := &mergeHeap{}
+	h := &utils.MergeHeap{}
 	heap.Init(h)
 
 	// seed heap with all initial adjacent pairs.
@@ -436,13 +460,13 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		b := tokens[j]
 
 		if rank, ok := t.pairRank[[2]int{a, b}]; ok {
-			heap.Push(h, mergeCand{
-				rank:       rank,
-				pos:        i,
-				leftToken:  a,
-				rightToken: b,
-				verL:       liveVersion[i],
-				verR:       liveVersion[j],
+			heap.Push(h, utils.MergeCand{
+				Rank:       rank,
+				Pos:        i,
+				LeftToken:  a,
+				RightToken: b,
+				VerL:       liveVersion[i],
+				VerR:       liveVersion[j],
 			})
 		}
 	}
@@ -457,8 +481,8 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 
 	// while there are still entries in our heap
 	for h.Len() > 0 {
-		c := heap.Pop(h).(mergeCand)
-		i := c.pos
+		c := heap.Pop(h).(utils.MergeCand)
+		i := c.Pos
 		if i == -1 {
 			continue
 		}
@@ -469,7 +493,7 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		}
 
 		// stale entry since atleast one version did not match
-		if liveVersion[i] != c.verL || liveVersion[j] != c.verR {
+		if liveVersion[i] != c.VerL || liveVersion[j] != c.VerR {
 			continue
 		}
 
@@ -479,7 +503,7 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		rankNow, ok := t.pairRank[[2]int{a, b}]
 
 		// if this entry doesn’t describe the same (a,b) pair with the same rank that it did when it was pushed — skip it
-		if !ok || rankNow != c.rank || a != c.leftToken || b != c.rightToken {
+		if !ok || rankNow != c.Rank || a != c.LeftToken || b != c.RightToken {
 			continue
 		}
 
@@ -514,26 +538,3 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 
 	return out
 }
-
-// ------------------------------ heap structures
-type mergeCand struct {
-	rank       int // lower wins
-	pos        int // left index; lower wins on tie to enforce leftmost
-	leftToken  int
-	rightToken int
-	verL       int
-	verR       int
-}
-
-type mergeHeap []mergeCand
-
-func (h mergeHeap) Len() int { return len(h) }
-func (h mergeHeap) Less(i, j int) bool {
-	if h[i].rank != h[j].rank {
-		return h[i].rank < h[j].rank
-	}
-	return h[i].pos < h[j].pos // leftmost tie-break
-}
-func (h mergeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h *mergeHeap) Push(x any)   { *h = append(*h, x.(mergeCand)) }
-func (h *mergeHeap) Pop() any     { old := *h; n := len(old); x := old[n-1]; *h = old[:n-1]; return x }
