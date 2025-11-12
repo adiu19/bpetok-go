@@ -1,5 +1,5 @@
 # bpetok-go
-
+BPE Training discovers the order, encoding replays it. We're going to build an encoder.
 ## Goals
 
 - Streaming input, unbounded length

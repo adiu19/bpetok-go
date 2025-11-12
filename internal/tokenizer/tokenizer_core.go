@@ -54,7 +54,8 @@ type Tokenizer struct {
 	// given two adjacent tokens (A,B), what's the merged token C
 	pairToken map[[2]int]int
 	// TODO: for streaming
-	maxMergeDepth int
+	maxMergeDepth   int
+	MaxTokenByteLen int
 }
 
 // LoadTokenizerFromFiles builds a tokenizer from vocab and merges
@@ -90,6 +91,13 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 		return nil, fmt.Errorf("failed to build revVocab: %w", err)
 	}
 
+	maxLen := 0
+	for _, bytes := range revVocab {
+		if n := len(bytes); n > maxLen {
+			maxLen = n
+		}
+	}
+
 	byteToToken, err := buildByteToToken(revVocab)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build bytesToToken : %w", err)
@@ -115,11 +123,12 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 	}
 
 	return &Tokenizer{
-		revVocab:      revVocab,
-		byteToToken:   byteToToken,
-		pairRank:      pairRank,
-		pairToken:     pairToken,
-		maxMergeDepth: 0,
+		revVocab:        revVocab,
+		byteToToken:     byteToToken,
+		pairRank:        pairRank,
+		pairToken:       pairToken,
+		maxMergeDepth:   0,
+		MaxTokenByteLen: maxLen,
 	}, nil
 
 }
