@@ -124,11 +124,28 @@ func (st *EncoderState) mergeAt(l, r, mergedID int) {
 func (st *EncoderState) tailStartIdx() int {
 	last := st.lastLive()
 	if last == -1 {
-		// TODO: complete
+		return st.sealIdx
 	}
 
-	// TODO: complete
-	return -1
+	budget := st.lMax - 1
+	sum := 0
+	i := last // start from the rightmost node that is live
+	for i >= st.sealIdx {
+		if !st.nodes[i].dead {
+			if sum+st.nodes[i].byteLen > budget {
+				break
+			}
+			sum += st.nodes[i].byteLen
+		}
+
+		i = st.nodes[i].left // walk left
+	}
+
+	if i < st.sealIdx {
+		return st.sealIdx // stop at sealIdx since that's the start of our tail
+	}
+
+	return st.nodes[i].right // we overflowed our bytes at i, which means we need to consider the right node
 }
 
 func (st *EncoderState) lastLive() int {
@@ -138,4 +155,79 @@ func (st *EncoderState) lastLive() int {
 		}
 	}
 	return -1
+}
+
+// advance sealIdx upto tail start, emitting tokens in the process
+func (st *EncoderState) sealCommitted() {
+	tailStart := st.tailStartIdx()
+	for st.sealIdx >= 0 && st.sealIdx < tailStart {
+		n := &st.nodes[st.sealIdx]
+		if !n.dead {
+			st.outBuf = append(st.outBuf, n.id)
+		}
+
+		st.sealIdx++
+		st.head = st.sealIdx // monotonic
+	}
+}
+
+// Push
+func (st *EncoderState) Push(chunk []byte) []int {
+	st.outBuf = st.outBuf[:0]
+	for _, b := range chunk {
+		st.appendByte(b)
+	}
+
+	for st.heap.Len() > 0 {
+		cand := heap.Pop(&st.heap).(utils.MergeCand)
+
+		l := cand.Pos
+		if l < 0 || l >= len(st.nodes) {
+			continue
+		}
+
+		r := st.nodes[l].right
+		if r < 0 {
+			continue
+		}
+
+		// stale?
+		if st.nodes[l].ver != cand.VerL || st.nodes[r].ver != cand.VerR {
+			continue
+		}
+
+		// tokens changed?
+		if st.nodes[l].id != cand.LeftToken || st.nodes[r].id != cand.RightToken {
+			continue
+		}
+
+		// still a valid merge?
+		mergedID, ok := st.tok.pairToken[[2]int{st.nodes[l].id, st.nodes[r].id}]
+		if !ok {
+			continue
+		}
+
+		st.mergeAt(l, r, mergedID)
+	}
+
+	st.sealCommitted()
+
+	out := make([]int, len(st.outBuf))
+	copy(out, st.outBuf)
+	return out
+}
+
+// Flush whatever remains
+func (st *EncoderState) Flush() []int {
+	out := st.outBuf[:0]
+	for i := st.head; i <= len(st.nodes); i++ {
+		if !st.nodes[i].dead {
+			out = append(out, st.nodes[i].id)
+		}
+	}
+
+	st.nodes = st.nodes[:0]
+	st.head, st.sealIdx = 0, 0
+	st.heap = st.heap[:0]
+	return append([]int(nil), out...)
 }
