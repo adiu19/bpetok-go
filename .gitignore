@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# pprof files
+*.pprof
+cpu.out
+mem.out
