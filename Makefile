@@ -38,6 +38,11 @@ test-decode:
 .PHONY: test-streaming
 test-streaming:
 	go test -v ./internal/tokenizer -run TestStreaming -count=1
+
+.PHONY: bench
+bench:
+	go test -run '^$$' -bench Benchmark -benchmem -benchtime=3x ./internal/tokenizer
+
 # Clean build artifacts
 .PHONY: clean
 clean:

@@ -11,18 +11,35 @@ func encodeStreaming(t *testing.T, tok *Tokenizer, input []byte, chunkSizes []in
 	es := NewEncoderState(tok)
 	var out []int
 
+	if len(chunkSizes) == 0 {
+		chunkSizes = []int{len(input)}
+	}
+
 	pos := 0
-	for _, sz := range chunkSizes {
-		if pos >= len(input) {
+	idx := 0
+	lastIdx := len(chunkSizes) - 1
+	for pos < len(input) {
+		sz := chunkSizes[idx]
+		if sz <= 0 {
 			break
 		}
+
+		if idx < lastIdx {
+			idx++
+		}
+
 		end := pos + sz
 		if end > len(input) {
 			end = len(input)
 		}
+
 		emitted := es.Push(input[pos:end])
 		out = append(out, emitted...)
 		pos = end
+
+		if idx >= len(chunkSizes) {
+			idx = lastIdx
+		}
 	}
 
 	out = append(out, es.Flush()...)

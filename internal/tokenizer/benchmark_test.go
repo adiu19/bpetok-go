@@ -28,7 +28,7 @@ func BenchmarkEncodeOffline(b *testing.B) {
 
 func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadTestData(b, "testdata/bench_corpus.txt")
+	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
 
 	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
@@ -42,7 +42,7 @@ func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
 
 func BenchmarkEncodeStreaming_4KBChunks(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadTestData(b, "testdata/bench_corpus.txt")
+	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
 
 	const chunkSize = 4 << 10 // 4 KiB
 	b.SetBytes(int64(len(input)))
