@@ -107,7 +107,6 @@ func (st *EncoderState) mergeAt(l, r, mergedID int) {
 	if nr >= 0 {
 		st.nodes[nr].left = l
 		st.nodes[nr].ver = st.bump()
-		st.nodes[nr].right = nr
 		st.enqueuePair(l, nr)
 	}
 
@@ -220,7 +219,7 @@ func (st *EncoderState) Push(chunk []byte) []int {
 // Flush whatever remains
 func (st *EncoderState) Flush() []int {
 	out := st.outBuf[:0]
-	for i := st.head; i <= len(st.nodes); i++ {
+	for i := st.head; i < len(st.nodes); i++ {
 		if !st.nodes[i].dead {
 			out = append(out, st.nodes[i].id)
 		}

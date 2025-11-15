@@ -1,0 +1,76 @@
+package tokenizer
+
+import (
+	"os"
+	"testing"
+)
+
+func mustLoadTestData(b *testing.B, path string) []byte {
+	b.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		b.Fatalf("failed to read test data %q: %v", path, err)
+	}
+	return data
+}
+
+func BenchmarkEncodeOffline(b *testing.B) {
+	tok := loadTestTokenizerB(b)
+	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
+
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_ = tok.EncodeOffline(input)
+	}
+}
+
+func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
+	tok := loadTestTokenizerB(b)
+	input := mustLoadTestData(b, "testdata/bench_corpus.txt")
+
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		es := NewEncoderState(tok)
+		_ = es.Push(input)
+		_ = es.Flush()
+	}
+}
+
+func BenchmarkEncodeStreaming_4KBChunks(b *testing.B) {
+	tok := loadTestTokenizerB(b)
+	input := mustLoadTestData(b, "testdata/bench_corpus.txt")
+
+	const chunkSize = 4 << 10 // 4 KiB
+	b.SetBytes(int64(len(input)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		es := NewEncoderState(tok)
+		var pos int
+		for pos < len(input) {
+			end := pos + chunkSize
+			if end > len(input) {
+				end = len(input)
+			}
+			_ = es.Push(input[pos:end])
+			pos = end
+		}
+		_ = es.Flush()
+	}
+}
+
+func loadTestTokenizerB(b *testing.B) *Tokenizer {
+	b.Helper()
+	tok, err := LoadTokenizerFromFiles(
+		"testdata/gpt2/vocab.json",
+		"testdata/gpt2/merges.txt",
+	)
+	if err != nil {
+		b.Fatalf("failed to load tokenizer: %v", err)
+	}
+	return tok
+}

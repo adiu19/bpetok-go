@@ -34,6 +34,10 @@ test-offline:
 test-decode:
 	go test -v ./internal/tokenizer -run TestDecode -count=1
 
+
+.PHONY: test-streaming
+test-streaming:
+	go test -v ./internal/tokenizer -run TestStreaming -count=1
 # Clean build artifacts
 .PHONY: clean
 clean:
