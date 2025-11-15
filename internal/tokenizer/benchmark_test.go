@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func mustLoadTestData(b *testing.B, path string) []byte {
+func mustLoadBenchCorpus(b *testing.B, path string) []byte {
 	b.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -16,7 +16,7 @@ func mustLoadTestData(b *testing.B, path string) []byte {
 
 func BenchmarkEncodeOffline(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
+	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
 
 	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
@@ -28,7 +28,7 @@ func BenchmarkEncodeOffline(b *testing.B) {
 
 func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
+	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
 
 	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
@@ -42,7 +42,7 @@ func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
 
 func BenchmarkEncodeStreaming_4KBChunks(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadTestData(b, "testdata/gpt2/bench_corpus.txt")
+	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
 
 	const chunkSize = 4 << 10 // 4 KiB
 	b.SetBytes(int64(len(input)))
