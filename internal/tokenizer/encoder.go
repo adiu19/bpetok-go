@@ -1,8 +1,6 @@
 package tokenizer
 
 import (
-	"container/heap"
-
 	"github.com/bpetok/internal/utils"
 )
 
@@ -13,16 +11,18 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		return nil
 	}
 
-	tokens := make([]int, n)
+	scratch := t.acquireScratch(n)
+	defer t.releaseScratch(scratch)
 
-	// convert the input to tokens, where each token currently represents a single byte
+	tokens := scratch.tokens
+
 	for i, b := range input {
 		tokens[i] = t.byteToToken[b]
 	}
 
 	// doubly linked-list
-	prev := make([]int, n)
-	next := make([]int, n)
+	prev := scratch.prev
+	next := scratch.next
 	for i := 0; i < n; i++ {
 		prev[i] = i - 1
 		next[i] = i + 1
@@ -32,25 +32,26 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	prev[0] = -1
 	next[n-1] = -1
 
-	// per-slot versioning to invalidate heap entries
-	liveVersion := make([]int, n)
+	liveVersion := scratch.live
+	for i := 0; i < n; i++ {
+		liveVersion[i] = 0
+	}
 
-	h := &utils.MergeHeap{}
-	heap.Init(h)
+	h := utils.NewBucketQueue(t.maxRank)
 
-	// seed heap with all initial adjacent pairs.
 	pushIfMergeable := func(i int) {
 		j := next[i]
 		if i == -1 || j == -1 {
-			// not a valid index
 			return
 		}
 
 		a := tokens[i]
 		b := tokens[j]
 
-		if rank, ok := t.pairRank[[2]int{a, b}]; ok {
-			heap.Push(h, utils.MergeCand{
+		info, ok := t.pairLookup.Lookup(a, b)
+		if ok {
+			rank := int(info >> 32)
+			h.Push(utils.MergeCand{
 				Rank:       rank,
 				Pos:        i,
 				LeftToken:  a,
@@ -61,7 +62,6 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		}
 	}
 
-	// loop that fills heap with initial seed
 	for i := 0; i != -1 && next[i] != -1; i = next[i] {
 		pushIfMergeable(i)
 	}
@@ -69,9 +69,11 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	// leftmost index (never dies; we always merge into the left slot)
 	head := 0
 
-	// while there are still entries in our heap
-	for h.Len() > 0 {
-		c := heap.Pop(h).(utils.MergeCand)
+	for {
+		c, ok := h.Pop()
+		if !ok {
+			break
+		}
 		i := c.Pos
 		if i == -1 {
 			continue
@@ -79,10 +81,9 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 
 		j := next[i]
 		if j == -1 {
-			continue // no right neibhbor anymore
+			continue
 		}
 
-		// stale entry since atleast one version did not match
 		if liveVersion[i] != c.VerL || liveVersion[j] != c.VerR {
 			continue
 		}
@@ -90,15 +91,19 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 		a := tokens[i]
 		b := tokens[j]
 
-		rankNow, ok := t.pairRank[[2]int{a, b}]
-
-		// if this entry doesn’t describe the same (a,b) pair with the same rank that it did when it was pushed — skip it
-		if !ok || rankNow != c.Rank || a != c.LeftToken || b != c.RightToken {
+		info, ok := t.pairLookup.Lookup(a, b)
+		if !ok {
 			continue
 		}
 
-		cID := t.pairToken[[2]int{a, b}]
-		tokens[i] = cID // collapse into slot i
+		rankNow := int(info >> 32)
+		cID := int(info & 0xFFFFFFFF)
+
+		if rankNow != c.Rank || a != c.LeftToken || b != c.RightToken {
+			continue
+		}
+
+		tokens[i] = cID
 
 		nj := next[j]
 		next[i] = nj
@@ -106,18 +111,15 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 			prev[nj] = i
 		}
 
-		// mark other pointers as dead
 		prev[j], next[j] = -1, -1
 
 		liveVersion[i]++
-		liveVersion[j]++ // j died; invalidate anything mentioning it
+		liveVersion[j]++
 
-		// push this newly created token as part of a new pair back into the heap, with the previous as the first element
 		if pi := prev[i]; pi != -1 {
 			pushIfMergeable(pi)
 		}
 
-		// push this newly created token as part of a new pair back into the heap, with the new token as the first element
 		pushIfMergeable(i)
 	}
 
@@ -127,4 +129,41 @@ func (t *Tokenizer) EncodeOffline(input []byte) []int {
 	}
 
 	return out
+}
+
+type encodeScratch struct {
+	tokens []int
+	prev   []int
+	next   []int
+	live   []int
+}
+
+func (t *Tokenizer) acquireScratch(n int) *encodeScratch {
+	v := t.scratchPool.Get()
+	var sc *encodeScratch
+	if v == nil {
+		sc = &encodeScratch{}
+	} else {
+		sc = v.(*encodeScratch)
+	}
+	sc.prepare(n)
+	return sc
+}
+
+func (t *Tokenizer) releaseScratch(sc *encodeScratch) {
+	t.scratchPool.Put(sc)
+}
+
+func (sc *encodeScratch) prepare(n int) {
+	sc.tokens = ensureIntCapacity(sc.tokens, n)
+	sc.prev = ensureIntCapacity(sc.prev, n)
+	sc.next = ensureIntCapacity(sc.next, n)
+	sc.live = ensureIntCapacity(sc.live, n)
+}
+
+func ensureIntCapacity(buf []int, n int) []int {
+	if cap(buf) < n {
+		return make([]int, n)
+	}
+	return buf[:n]
 }

@@ -43,6 +43,11 @@ test-streaming:
 bench:
 	go test -run '^$$' -bench Benchmark -benchmem -benchtime=3x ./internal/tokenizer
 
+.PHONY: bench-cpu
+bench-cpu:
+	go test -run '^$$' -bench BenchmarkEncodeOffline -benchmem -benchtime=10x -cpuprofile=cpu.out ./internal/tokenizer
+	@echo "Profile saved to cpu.out. View with: go tool pprof cpu.out"
+
 # Clean build artifacts
 .PHONY: clean
 clean:

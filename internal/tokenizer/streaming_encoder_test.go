@@ -56,8 +56,8 @@ func TestStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
 		{"empty", ""},
 		{"ascii_short", "hello world"},
 		{"ascii_punct", "hello, world! this is bpe-tok :)"},
-		{"utf8_simple", "नमस्ते दुनिया"},
-		{"emoji", "hi 👋🏽 this is 🔥 tokenizer"},
+		{"utf8_simple", "Hello 你好 नमस्ते"},
+		{"emoji", "hi 👋🏽 this is  tokenizer"},
 		{"repeated_patterns", "aaaaaaabaaaaaaabaaaaaaab"},
 	}
 
@@ -99,7 +99,6 @@ func TestStreamingMatchesGreedy_Randomized(t *testing.T) {
 		n := r.Intn(maxLen + 1)
 		input := make([]byte, n)
 		for i := 0; i < n; i++ {
-			// bias slightly toward readable ASCII, but allow full byte range
 			if r.Float64() < 0.8 {
 				input[i] = byte(32 + r.Intn(95))
 			} else {
@@ -107,7 +106,6 @@ func TestStreamingMatchesGreedy_Randomized(t *testing.T) {
 			}
 		}
 
-		// random chunk sizes
 		var chunkSizes []int
 		if n == 0 {
 			chunkSizes = []int{0}
@@ -118,7 +116,6 @@ func TestStreamingMatchesGreedy_Randomized(t *testing.T) {
 				chunkSizes = append(chunkSizes, sz)
 				remaining -= sz
 			}
-			// allow overshoot to exercise Push/Flush robustness
 			if r.Float64() < 0.3 {
 				chunkSizes = append(chunkSizes, 1+r.Intn(maxLen))
 			}

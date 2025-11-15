@@ -65,8 +65,10 @@ func TestOffline_MinimalMergeTerminates(t *testing.T) {
 	tok := loadTestTokenizer(t)
 
 	var a, b, c int
-	for p, out := range tok.pairToken {
-		a, b, c = p[0], p[1], out
+	for key, out := range tok.pairToken {
+		a = int(key >> 32)
+		b = int(key & 0xFFFFFFFF)
+		c = out
 		break
 	}
 	if a == 0 && b == 0 && c == 0 {
@@ -102,13 +104,15 @@ func TestOfflineEncodeMergeChainsDepth2(t *testing.T) {
 	tok := loadTestTokenizer(t)
 
 	limit := 0
-	for pair1, x := range tok.pairToken {
+	for key1, x := range tok.pairToken {
+		a := int(key1 >> 32)
+		b := int(key1 & 0xFFFFFFFF)
 		found := false
 		var c, y int
 		// scan right-hand neighbors for x
-		for p2, yCand := range tok.pairToken {
-			if p2[0] == x {
-				c = p2[1]
+		for key2, yCand := range tok.pairToken {
+			if int(key2>>32) == x {
+				c = int(key2 & 0xFFFFFFFF)
 				y = yCand
 				found = true
 				break
@@ -117,9 +121,6 @@ func TestOfflineEncodeMergeChainsDepth2(t *testing.T) {
 		if !found {
 			continue
 		}
-
-		a := pair1[0]
-		b := pair1[1]
 		in := append(append(append([]byte{}, tok.revVocab[a]...), tok.revVocab[b]...), tok.revVocab[c]...)
 		ids := tok.EncodeOffline(in)
 		if len(ids) != 1 || ids[0] != y {
@@ -157,17 +158,17 @@ func TestOfflineEncodeRoundTripRandom(t *testing.T) {
 func TestOfflineEncodeLeftmostTieBreak(t *testing.T) {
 	tok := loadTestTokenizer(t)
 
-	var picked [2]int
-	for pair := range tok.pairRank {
-		picked = pair
+	var pickedKey uint64
+	for key := range tok.pairRank {
+		pickedKey = key
 		break
 	}
-	if picked == ([2]int{}) {
+	if pickedKey == 0 {
 		t.Skip("no merges found; unlikely")
 	}
 
-	p := picked[0]
-	q := picked[1]
+	p := int(pickedKey >> 32)
+	q := int(pickedKey & 0xFFFFFFFF)
 
 	in := append(append(append([]byte{}, tok.revVocab[p]...), tok.revVocab[q]...), tok.revVocab[p]...)
 	in = append(in, tok.revVocab[q]...)

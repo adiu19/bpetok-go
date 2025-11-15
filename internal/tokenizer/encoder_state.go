@@ -2,7 +2,7 @@ package tokenizer
 
 // EncoderState implements a simple streaming encoder by buffering input bytes
 // and greedily flushing any prefix that is guaranteed not to participate in
-// future merges. The final lMax-1 bytes are held back as a safety margin so
+// future merges (based off of the max token size in our vocab). The final lMax-1 bytes are held back as a safety margin so
 // merges that span chunk boundaries are preserved.
 type EncoderState struct {
 	tok         *Tokenizer

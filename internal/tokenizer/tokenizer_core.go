@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -40,8 +41,8 @@ type Decoder interface {
 // Invariants we maintain:
 //   - revVocab[id] is the exact byte sequence for token ID 'id'.
 //   - For every byte b in [0..255], byteToToken[b] gives a valid base token ID.
-//   - If pairRank[[2]int{A,B}] exists, then pairToken[[2]int{A,B}] exists and
-//     pairToken[[2]int{A,B}] = C is the token ID produced by merging A then B.
+//   - If pairRank[packPair(A,B)] exists, then pairToken[packPair(A,B)] exists and
+//     pairToken[packPair(A,B)] = C is the token ID produced by merging A then B.
 type Tokenizer struct {
 	// for decoding, index = token_id, value is byte sequence
 	revVocab [][]byte
@@ -49,13 +50,23 @@ type Tokenizer struct {
 	//  in a byte-level BPE tokenizer, every possible byte 0..255 must have a mapping.
 	byteToToken [256]int
 	// pairRank[bpePair{A,B}] is the priority rank for merging token A followed by token B.
-	// bpePair value can be used as a map key because fixed-size arrays are comparable
-	pairRank map[[2]int]int
+	// Uses packed uint64 keys: (uint64(a) << 32) | uint64(b)
+	pairRank map[uint64]int
 	// given two adjacent tokens (A,B), what's the merged token C
-	pairToken map[[2]int]int
+	// Uses packed uint64 keys: (uint64(a) << 32) | uint64(b)
+	pairToken map[uint64]int
+	// pairInfo combines rank and token in one lookup for performance
+	// Uses packed uint64 keys: (uint64(a) << 32) | uint64(b)
+	// Value: (rank << 32) | tokenID
+	pairInfo map[uint64]uint64
+	// pairLookup provides fast O(1) lookup for common pairs using 2D array
+	pairLookup *PairLookup
 	// TODO: for streaming
 	maxMergeDepth   int
 	MaxTokenByteLen int
+	maxRank         int // maximum rank value for bucket queue sizing
+
+	scratchPool sync.Pool
 }
 
 // LoadTokenizerFromFiles builds a tokenizer from vocab and merges
@@ -112,7 +123,7 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 		return nil, fmt.Errorf("failed to read mergs: %w", err)
 	}
 
-	pairRank, err := buildPairRank(mergesLines, vocab)
+	pairRank, maxRank, err := buildPairRank(mergesLines, vocab)
 	if err != nil {
 		return nil, fmt.Errorf("error while building pairRank : %w", err)
 	}
@@ -122,13 +133,27 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 		return nil, fmt.Errorf("failed to build pairToken : %w", err)
 	}
 
+	// Build combined pairInfo map for faster lookups
+	pairInfo := make(map[uint64]uint64, len(pairRank))
+	for key, rank := range pairRank {
+		token := pairToken[key]
+		// Pack rank in upper 32 bits, token in lower 32 bits
+		pairInfo[key] = (uint64(rank) << 32) | uint64(token)
+	}
+
+	// Build fast lookup structure (2D array for common pairs)
+	pairLookup := NewPairLookup(pairInfo, len(revVocab))
+
 	return &Tokenizer{
 		revVocab:        revVocab,
 		byteToToken:     byteToToken,
 		pairRank:        pairRank,
 		pairToken:       pairToken,
+		pairInfo:        pairInfo,
+		pairLookup:      pairLookup,
 		maxMergeDepth:   0,
 		MaxTokenByteLen: maxLen,
+		maxRank:         maxRank,
 	}, nil
 
 }
@@ -298,13 +323,20 @@ func buildCursedByteDecoder() map[rune]byte {
 	return byteDecoder
 }
 
+// packPair packs two token IDs into a uint64 for use as a map key
+func packPair(a, b int) uint64 {
+	return (uint64(a) << 32) | uint64(b)
+}
+
 // buildPairRank assigns a rank (0 being highest) to each pair of tokens in the merges dataset
 // the merges dataset comes to us as a pair of utf-8 encoded strings, which we map to token ids using vocab
 // the function also contains a validation step that ensures merges doesn't contain duplicate entries
-func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[[2]int]int, error) {
-	pairRank := make(map[[2]int]int, len(mergesLines))
+// Returns the pairRank map, maxRank value, and any error
+func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[uint64]int, int, error) {
+	pairRank := make(map[uint64]int, len(mergesLines))
 
 	rank := 0
+	maxRank := 0
 	for _, line := range mergesLines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") { // skip this line
@@ -312,7 +344,7 @@ func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[[2]int]in
 		}
 		parts := strings.Fields(line)
 		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid merge line %q, we want exactly two items per line", line)
+			return nil, 0, fmt.Errorf("invalid merge line %q, we want exactly two items per line", line)
 		}
 
 		leftStr := parts[0]
@@ -322,34 +354,37 @@ func buildPairRank(mergesLines []string, vocabMap map[string]int) (map[[2]int]in
 		rightID, ok2 := vocabMap[rightStr]
 
 		if !ok1 || !ok2 {
-			return nil, fmt.Errorf("failed to find a vocab entry for an entry in merges. left: %v, right: %v", &leftStr, &rightStr)
+			return nil, 0, fmt.Errorf("failed to find a vocab entry for an entry in merges. left: %v, right: %v", &leftStr, &rightStr)
 		}
 
-		key := [2]int{leftID, rightID}
+		key := packPair(leftID, rightID)
 		if _, exists := pairRank[key]; exists {
-			return nil, fmt.Errorf("duplicate merge pair found in given merges, %v", key)
+			return nil, 0, fmt.Errorf("duplicate merge pair found in given merges, (%d, %d)", leftID, rightID)
 		}
 
 		pairRank[key] = rank
+		if rank > maxRank {
+			maxRank = rank
+		}
 		rank++
 	}
 
-	return pairRank, nil
+	return pairRank, maxRank, nil
 }
 
 // buildPairToken builds a mapping structure that maps a pair of token ids proposed by merges rules to an output token id
-func buildPairToken(revVocab [][]byte, pairRank map[[2]int]int) (map[[2]int]int, error) {
+func buildPairToken(revVocab [][]byte, pairRank map[uint64]int) (map[uint64]int, error) {
 	// init bytesToID, which is our temporary "reverse mapping of revVocab"
 	bytesToID := make(map[string]int, len(revVocab))
 	for id, bs := range revVocab {
 		bytesToID[string(bs)] = id
 	}
 
-	pairToken := make(map[[2]int]int, len(pairRank))
+	pairToken := make(map[uint64]int, len(pairRank))
 
-	for pair := range pairRank {
-		leftID := pair[0]
-		rightID := pair[1]
+	for key := range pairRank {
+		leftID := int(key >> 32)
+		rightID := int(key & 0xFFFFFFFF)
 
 		if leftID < 0 || leftID >= len(revVocab) ||
 			rightID < 0 || rightID >= len(revVocab) {
@@ -369,11 +404,11 @@ func buildPairToken(revVocab [][]byte, pairRank map[[2]int]int) (map[[2]int]int,
 
 		}
 
-		if _, exists := pairToken[pair]; exists {
-			return nil, fmt.Errorf("duplicate pair in pairToken for %v", pair)
+		if _, exists := pairToken[key]; exists {
+			return nil, fmt.Errorf("duplicate pair in pairToken for (%d, %d)", leftID, rightID)
 		}
 
-		pairToken[pair] = mergedID
+		pairToken[key] = mergedID
 
 	}
 
