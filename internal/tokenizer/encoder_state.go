@@ -65,7 +65,7 @@ func (st *EncoderState) emitCommitted() {
 
 	consumed := 0
 	for _, id := range tokens {
-		tokLen := len(st.tok.revVocab[id])
+		tokLen := st.tok.tokenLen[id]
 		if consumed+tokLen > emitLimit {
 			break
 		}

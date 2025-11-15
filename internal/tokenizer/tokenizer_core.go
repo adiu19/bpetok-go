@@ -46,6 +46,8 @@ type Decoder interface {
 type Tokenizer struct {
 	// for decoding, index = token_id, value is byte sequence
 	revVocab [][]byte
+	// tokenLen caches the byte length of each token to avoid repeated len(revVocab[id]) lookups
+	tokenLen []int
 	//  seed the first pass of encoder from raw bytes
 	//  in a byte-level BPE tokenizer, every possible byte 0..255 must have a mapping.
 	byteToToken [256]int
@@ -103,8 +105,11 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 	}
 
 	maxLen := 0
-	for _, bytes := range revVocab {
-		if n := len(bytes); n > maxLen {
+	tokenLen := make([]int, len(revVocab))
+	for id, bytes := range revVocab {
+		n := len(bytes)
+		tokenLen[id] = n
+		if n > maxLen {
 			maxLen = n
 		}
 	}
@@ -146,6 +151,7 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 
 	return &Tokenizer{
 		revVocab:        revVocab,
+		tokenLen:        tokenLen,
 		byteToToken:     byteToToken,
 		pairRank:        pairRank,
 		pairToken:       pairToken,
