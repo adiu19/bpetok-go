@@ -4,10 +4,9 @@ package tokenizer
 // - 2D array for pairs where both tokens are < fastLookupSize (O(1) lookup)
 // - Map fallback for larger pairs
 type PairLookup struct {
-	
-	fastLookup    [][]uint64
+	fastLookup     [][]uint64
 	fastLookupSize int
-	fallback map[uint64]uint64
+	fallback       map[uint64]uint64
 }
 
 // NewPairLookup creates a new pair lookup structure
@@ -16,7 +15,7 @@ func NewPairLookup(pairInfo map[uint64]uint64, vocabSize int) *PairLookup {
 	if vocabSize < fastLookupSize {
 		fastLookupSize = vocabSize
 	}
-	
+
 	fastLookup := make([][]uint64, fastLookupSize)
 	for i := range fastLookup {
 		fastLookup[i] = make([]uint64, fastLookupSize)
@@ -24,20 +23,20 @@ func NewPairLookup(pairInfo map[uint64]uint64, vocabSize int) *PairLookup {
 			fastLookup[i][j] = ^uint64(0)
 		}
 	}
-	
+
 	fallback := make(map[uint64]uint64, len(pairInfo)/10)
-	
+
 	for key, value := range pairInfo {
 		a := int(key >> 32)
 		b := int(key & 0xFFFFFFFF)
-		
+
 		if a < fastLookupSize && b < fastLookupSize {
 			fastLookup[a][b] = value
 		} else {
 			fallback[key] = value
 		}
 	}
-	
+
 	return &PairLookup{
 		fastLookup:     fastLookup,
 		fastLookupSize: fastLookupSize,
@@ -54,9 +53,8 @@ func (pl *PairLookup) Lookup(a, b int) (uint64, bool) {
 		}
 		return 0, false
 	}
-	
+
 	key := packPair(a, b)
 	value, ok := pl.fallback[key]
 	return value, ok
 }
-

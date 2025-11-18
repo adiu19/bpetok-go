@@ -1,10 +1,9 @@
 package utils
 
-
 type BucketQueue struct {
 	buckets    [][]MergeCand
-	current    int           
-	totalCount int           
+	current    int
+	totalCount int
 }
 
 func NewBucketQueue(maxRank int) *BucketQueue {
@@ -25,10 +24,10 @@ func (bq *BucketQueue) Push(c MergeCand) {
 		copy(newBuckets, bq.buckets)
 		bq.buckets = newBuckets
 	}
-	
+
 	bucket := bq.buckets[rank]
 	bucketLen := len(bucket)
-	
+
 	var insertPos int
 	if bucketLen < 16 {
 		insertPos = bucketLen
@@ -50,7 +49,7 @@ func (bq *BucketQueue) Push(c MergeCand) {
 		}
 		insertPos = left
 	}
-	
+
 	if insertPos == bucketLen {
 		bucket = append(bucket, c)
 	} else {
@@ -66,16 +65,15 @@ func (bq *BucketQueue) Pop() (MergeCand, bool) {
 	for bq.current < len(bq.buckets) && len(bq.buckets[bq.current]) == 0 {
 		bq.current++
 	}
-	
+
 	if bq.current >= len(bq.buckets) {
 		return MergeCand{}, false
 	}
-	
+
 	bucket := bq.buckets[bq.current]
 	c := bucket[0]
 	bq.buckets[bq.current] = bucket[1:]
 	bq.totalCount--
-	
+
 	return c, true
 }
-
