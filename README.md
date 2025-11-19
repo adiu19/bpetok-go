@@ -25,3 +25,4 @@ BPE Training discovers the order, encoding replays it. We're going to build an e
 ## TODOs
 1. Impose a max working set per encoder
 2. Replace [2]int in the tokenizer with bit-packing for faster lookups
+3. Remove sync.Pool and use per-stream, pre-allocated slices
