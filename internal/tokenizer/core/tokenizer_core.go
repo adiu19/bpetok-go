@@ -193,6 +193,10 @@ func (t *Tokenizer) GetByteToUnicodeToken(b byte) int {
 }
 
 // GetPairRank returns the rank for a pair of tokens (a, b) and whether it exists
+func (t *Tokenizer) GetMaxRank() int {
+	return t.maxRank
+}
+
 func (t *Tokenizer) GetPairRank(a, b int) (int, bool) {
 	info, ok := t.pairLookup.Lookup(a, b)
 	if !ok {

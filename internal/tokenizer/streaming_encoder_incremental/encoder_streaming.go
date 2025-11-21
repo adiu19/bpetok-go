@@ -1,7 +1,6 @@
 package streaming_encoder_incremental
 
 import (
-	"fmt"
 	"github.com/bpetok/internal/tokenizer/core"
 )
 
@@ -32,13 +31,14 @@ type StreamingEncoderV2 struct {
 
 func NewStreamingEncoderV2(tok *core.Tokenizer) *StreamingEncoderV2 {
 	tok.UseUnicodeInitTokens = true
+	maxRank := tok.GetMaxRank()
 	return &StreamingEncoderV2{
 		tok:     tok,
 		head:    -1,
 		tail:    -1,
 		liveGen: 1,
 		outBuf:  make([]int, 0, 128),
-		heap:    newMergeHeap(),
+		heap:    newMergeHeapWithMaxRank(maxRank),
 	}
 }
 
@@ -50,7 +50,6 @@ func (se *StreamingEncoderV2) Push(chunk []byte) []int {
 	}
 
 	se.seedAdjacency(newNodes)
-	fmt.Println("HEAP EMPTY AFTER seeding? ", se.heap.Empty())
 
 	se.runMerges()
 
