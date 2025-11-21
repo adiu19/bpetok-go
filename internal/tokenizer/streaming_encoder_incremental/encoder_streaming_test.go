@@ -41,8 +41,10 @@ func encodeStreamingV2(t *testing.T, tok *core.Tokenizer, chunkSizes []int, inpu
 }
 
 func TestStreamingV2_MatchesOffline(t *testing.T) {
-    tok, err := core.LoadTokenizerFromFiles("../../testdata/gpt2")
-    if err != nil { t.Fatalf("load tokenizer: %v", err) }
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
 
     input := []byte("hello world! this is a streaming bpe test across chunk boundaries.")
 
@@ -57,8 +59,10 @@ func TestStreamingV2_MatchesOffline(t *testing.T) {
 }
 
 func TestStreamingV2_FuzzRandom(t *testing.T) {
-    tok, err := core.LoadTokenizerFromFiles("../../testdata/gpt2")
-    if err != nil { t.Fatalf("load tokenizer: %v", err) }
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
 
     rand.Seed(time.Now().UnixNano())
 
@@ -93,7 +97,10 @@ func TestStreamingV2_FuzzRandom(t *testing.T) {
 }
 
 func TestStreamingV2_ChunkBoundaries(t *testing.T) {
-    tok, _ := core.LoadTokenizerFromFiles("../../testdata/gpt2")
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
 
     input := []byte("aaaaaaaabbbbbbbbccccccccddddddddeeeeeeee")
 
@@ -117,7 +124,10 @@ func TestStreamingV2_ChunkBoundaries(t *testing.T) {
 }
 
 func TestStreamingV2_EdgeCases(t *testing.T) {
-    tok, _ := core.LoadTokenizerFromFiles("../../testdata/gpt2")
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
 
     inputs := [][]byte{
         {},
