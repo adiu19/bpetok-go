@@ -1,4 +1,4 @@
-package tokenizer
+package core
 
 // Decode a given sequence of tokens to a sequence of bytes
 func (t *Tokenizer) Decode(tokens []int) []byte {
@@ -22,3 +22,4 @@ func (t *Tokenizer) Decode(tokens []int) []byte {
 
 	return out
 }
+

@@ -42,22 +42,22 @@ test-streaming:
 
 .PHONY: bench
 bench:
-	go test -run '^$$' -bench Benchmark -benchmem -benchtime=3x ./internal/tokenizer
+	go test -run '^$$' -bench Benchmark -benchmem -benchtime=3x ./internal/tokenizer/offline_encoder ./internal/tokenizer/streaming_encoder_naive
 
 .PHONY: bench-cpu
 bench-cpu:
-	go test -run '^$$' -bench BenchmarkEncodeOffline -benchmem -benchtime=10x -cpuprofile=cpu.out ./internal/tokenizer
+	go test -run '^$$' -bench BenchmarkEncodeOffline -benchmem -benchtime=10x -cpuprofile=cpu.out ./internal/tokenizer/offline_encoder
 	@echo "Profile saved to cpu.out. View with: go tool pprof cpu.out"
 
 .PHONY: bench-naive-streaming-trace-whole-chunk
 bench-naive-streaming-trace-whole-chunk:
-	GOMAXPROCS=$(GOMAXPROCS)go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_WholeChunk -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer
+	GOMAXPROCS=$(GOMAXPROCS) go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_WholeChunk -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer/streaming_encoder_naive
 	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
 	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
 
 .PHONY: bench-naive-streaming-trace-4kb-chunk
 bench-naive-streaming-trace-4kb-chunk:
-	GOMAXPROCS=$(GOMAXPROCS) go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_4KBChunks -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer
+	GOMAXPROCS=$(GOMAXPROCS) go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_4KBChunks -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer/streaming_encoder_naive
 	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
 	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
 # Clean build artifacts

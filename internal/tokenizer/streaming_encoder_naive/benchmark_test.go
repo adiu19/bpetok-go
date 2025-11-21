@@ -1,8 +1,10 @@
-package tokenizer
+package streaming_encoder_naive
 
 import (
 	"os"
 	"testing"
+
+	"github.com/bpetok/internal/tokenizer/core"
 )
 
 func mustLoadBenchCorpus(b *testing.B, path string) []byte {
@@ -14,27 +16,15 @@ func mustLoadBenchCorpus(b *testing.B, path string) []byte {
 	return data
 }
 
-func BenchmarkEncodeOffline(b *testing.B) {
-	tok := loadTestTokenizerB(b)
-	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
-
-	b.SetBytes(int64(len(input)))
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		_ = tok.EncodeOffline(input)
-	}
-}
-
 func BenchmarkNaiveEncodeStreaming_WholeChunk(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
+	input := mustLoadBenchCorpus(b, "../testdata/gpt2/bench_corpus.txt")
 
 	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		es := NewEncoderState(tok)
+		es := NewNaiveStreamingEncoderState(tok)
 		_ = es.Push(input)
 		_ = es.Flush()
 	}
@@ -42,14 +32,14 @@ func BenchmarkNaiveEncodeStreaming_WholeChunk(b *testing.B) {
 
 func BenchmarkNaiveEncodeStreaming_4KBChunks(b *testing.B) {
 	tok := loadTestTokenizerB(b)
-	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
+	input := mustLoadBenchCorpus(b, "../testdata/gpt2/bench_corpus.txt")
 
 	const chunkSize = 4 << 10 // 4 KiB
 	b.SetBytes(int64(len(input)))
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		es := NewEncoderState(tok)
+		es := NewNaiveStreamingEncoderState(tok)
 		var pos int
 		for pos < len(input) {
 			end := pos + chunkSize
@@ -63,14 +53,15 @@ func BenchmarkNaiveEncodeStreaming_4KBChunks(b *testing.B) {
 	}
 }
 
-func loadTestTokenizerB(b *testing.B) *Tokenizer {
+func loadTestTokenizerB(b *testing.B) *core.Tokenizer {
 	b.Helper()
-	tok, err := LoadTokenizerFromFiles(
-		"testdata/gpt2/vocab.json",
-		"testdata/gpt2/merges.txt",
+	tok, err := core.LoadTokenizerFromFiles(
+		"../testdata/gpt2/vocab.json",
+		"../testdata/gpt2/merges.txt",
 	)
 	if err != nil {
 		b.Fatalf("failed to load tokenizer: %v", err)
 	}
 	return tok
 }
+

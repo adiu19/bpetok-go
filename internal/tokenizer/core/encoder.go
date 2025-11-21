@@ -1,4 +1,4 @@
-package tokenizer
+package core
 
 import (
 	"github.com/bpetok/internal/utils"
@@ -167,3 +167,4 @@ func ensureIntCapacity(buf []int, n int) []int {
 	}
 	return buf[:n]
 }
+

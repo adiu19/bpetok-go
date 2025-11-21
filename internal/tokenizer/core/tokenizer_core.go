@@ -1,4 +1,4 @@
-package tokenizer
+package core
 
 import (
 	"bufio"
@@ -162,6 +162,14 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 		maxRank:         maxRank,
 	}, nil
 
+}
+
+// TokenLen returns the byte length of the given token ID
+func (t *Tokenizer) TokenLen(id int) int {
+	if id < 0 || id >= len(t.tokenLen) {
+		return 0
+	}
+	return t.tokenLen[id]
 }
 
 // buildByteToToken constructs the [256]int lookup table that maps a single raw

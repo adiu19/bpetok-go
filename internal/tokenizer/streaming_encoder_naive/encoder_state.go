@@ -1,32 +1,34 @@
-package tokenizer
+package streaming_encoder_naive
+
+import "github.com/bpetok/internal/tokenizer/core"
 
 // EncoderState implements a NAIVE (greedy) streaming encoder by buffering input bytes
 // and greedily flushing any prefix that is guaranteed not to participate in
 // future merges (based off of the max token size in our vocab). The final lMax-1 bytes are held back as a safety margin so
 // merges that span chunk boundaries are preserved.
-type EncoderState struct {
-	tok         *Tokenizer
+type NaiveStreamingEncoderState struct {
+	tok         *core.Tokenizer
 	tailReserve int
 
 	buf    []byte
 	outBuf []int
 }
 
-// NewEncoderState returns a new instance of the encoder state.
-func NewEncoderState(t *Tokenizer) *EncoderState {
+// NewNaiveStreamingEncoderState returns a new instance of the encoder state.
+func NewNaiveStreamingEncoderState(t *core.Tokenizer) *NaiveStreamingEncoderState {
 	tail := 0
 	if t.MaxTokenByteLen > 0 {
 		tail = t.MaxTokenByteLen - 1
 	}
 
-	return &EncoderState{
+	return &NaiveStreamingEncoderState{
 		tok:         t,
 		tailReserve: tail,
 	}
 }
 
 // Push consumes the next chunk of raw bytes and emits any finalized tokens.
-func (st *EncoderState) Push(chunk []byte) []int {
+func (st *NaiveStreamingEncoderState) Push(chunk []byte) []int {
 	st.outBuf = st.outBuf[:0]
 	if len(chunk) > 0 {
 		st.buf = append(st.buf, chunk...)
@@ -41,7 +43,7 @@ func (st *EncoderState) Push(chunk []byte) []int {
 }
 
 // Flush encodes whatever bytes remain in the internal buffer.
-func (st *EncoderState) Flush() []int {
+func (st *NaiveStreamingEncoderState) Flush() []int {
 	st.outBuf = st.outBuf[:0]
 	if len(st.buf) > 0 {
 		tokens := st.tok.EncodeOffline(st.buf)
@@ -55,7 +57,7 @@ func (st *EncoderState) Flush() []int {
 	return append([]int(nil), st.outBuf...)
 }
 
-func (st *EncoderState) emitCommitted() {
+func (st *NaiveStreamingEncoderState) emitCommitted() {
 	emitLimit := len(st.buf) - st.tailReserve
 	if emitLimit <= 0 {
 		return
@@ -65,7 +67,7 @@ func (st *EncoderState) emitCommitted() {
 
 	consumed := 0
 	for _, id := range tokens {
-		tokLen := st.tok.tokenLen[id]
+		tokLen := st.tok.TokenLen(id)
 		if consumed+tokLen > emitLimit {
 			break
 		}

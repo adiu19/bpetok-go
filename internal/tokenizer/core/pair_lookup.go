@@ -1,4 +1,4 @@
-package tokenizer
+package core
 
 // PairLookup provides fast lookup of pair info (rank and token) using a hybrid approach:
 // - 2D array for pairs where both tokens are < fastLookupSize (O(1) lookup)
@@ -58,3 +58,4 @@ func (pl *PairLookup) Lookup(a, b int) (uint64, bool) {
 	value, ok := pl.fallback[key]
 	return value, ok
 }
+

@@ -1,14 +1,18 @@
-package tokenizer
+package streaming_encoder_naive
 
 import (
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/bpetok/internal/tokenizer/core"
 )
 
-func encodeStreamingNaive(t *testing.T, tok *Tokenizer, input []byte, chunkSizes []int) []int {
+func encodeStreamingNaive(t *testing.T, tok *core.Tokenizer, input []byte, chunkSizes []int) []int {
 	t.Helper()
-	es := NewEncoderState(tok)
+	es := NewNaiveStreamingEncoderState(tok)
 	var out []int
 
 	if len(chunkSizes) == 0 {
@@ -44,6 +48,23 @@ func encodeStreamingNaive(t *testing.T, tok *Tokenizer, input []byte, chunkSizes
 
 	out = append(out, es.Flush()...)
 	return out
+}
+
+func loadTestTokenizer(t *testing.T) *core.Tokenizer {
+	t.Helper()
+
+	vocabPath := os.Getenv("TOKENIZER_VOCAB")
+	mergesPath := os.Getenv("TOKENIZER_MERGES")
+	if vocabPath == "" || mergesPath == "" {
+		vocabPath = filepath.Join("../testdata/gpt2", "vocab.json")
+		mergesPath = filepath.Join("../testdata/gpt2", "merges.txt")
+	}
+
+	tok, err := core.LoadTokenizerFromFiles(vocabPath, mergesPath)
+	if err != nil {
+		t.Fatalf("failed to load tokenizer: %v", err)
+	}
+	return tok
 }
 
 func TestNaiveStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
