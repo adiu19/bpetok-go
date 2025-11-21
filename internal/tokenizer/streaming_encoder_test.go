@@ -84,7 +84,7 @@ func TestNaiveStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
 	}
 }
 
-func TestStreamingMatchesGreedy_Randomized(t *testing.T) {
+func TestNaiveStreamingMatchesGreedy_Randomized(t *testing.T) {
 	tok := loadTestTokenizer(t)
 
 	const (
