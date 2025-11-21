@@ -45,12 +45,15 @@ type Decoder interface {
 //     pairToken[packPair(A,B)] = C is the token ID produced by merging A then B.
 type Tokenizer struct {
 	// for decoding, index = token_id, value is byte sequence
-	revVocab [][]byte
+	RevVocab [][]byte
 	// tokenLen caches the byte length of each token to avoid repeated len(revVocab[id]) lookups
 	tokenLen []int
 	//  seed the first pass of encoder from raw bytes
 	//  in a byte-level BPE tokenizer, every possible byte 0..255 must have a mapping.
 	byteToToken [256]int
+
+	unicodeByteToToken [256]int
+
 	// pairRank[bpePair{A,B}] is the priority rank for merging token A followed by token B.
 	// Uses packed uint64 keys: (uint64(a) << 32) | uint64(b)
 	pairRank map[uint64]int
@@ -69,6 +72,8 @@ type Tokenizer struct {
 	maxRank         int // maximum rank value for bucket queue sizing
 
 	scratchPool sync.Pool
+
+	UseUnicodeInitTokens bool // backward-compatible switch
 }
 
 // LoadTokenizerFromFiles builds a tokenizer from vocab and merges
@@ -119,6 +124,11 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 		return nil, fmt.Errorf("failed to build bytesToToken : %w", err)
 	}
 
+	unicodeByteToToken, err := buildUnicodeByteToToken(vocab)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build unicodeByteToToken : %w", err)
+	}
+
 	// --------------------------------------------------------------------
 	// ---------------------------------------------------- onto merges now
 	// --------------------------------------------------------------------
@@ -150,16 +160,17 @@ func LoadTokenizerFromFiles(vocabPath, mergesPath string) (*Tokenizer, error) {
 	pairLookup := NewPairLookup(pairInfo, len(revVocab))
 
 	return &Tokenizer{
-		revVocab:        revVocab,
-		tokenLen:        tokenLen,
-		byteToToken:     byteToToken,
-		pairRank:        pairRank,
-		pairToken:       pairToken,
-		pairInfo:        pairInfo,
-		pairLookup:      pairLookup,
-		maxMergeDepth:   0,
-		MaxTokenByteLen: maxLen,
-		maxRank:         maxRank,
+		RevVocab:           revVocab,
+		tokenLen:           tokenLen,
+		byteToToken:        byteToToken,
+		unicodeByteToToken: unicodeByteToToken,
+		pairRank:           pairRank,
+		pairToken:          pairToken,
+		pairInfo:           pairInfo,
+		pairLookup:         pairLookup,
+		maxMergeDepth:      0,
+		MaxTokenByteLen:    maxLen,
+		maxRank:            maxRank,
 	}, nil
 
 }
@@ -170,6 +181,35 @@ func (t *Tokenizer) TokenLen(id int) int {
 		return 0
 	}
 	return t.tokenLen[id]
+}
+
+// GetByteToToken returns the token ID for a given byte
+func (t *Tokenizer) GetByteToToken(b byte) int {
+	return t.byteToToken[b]
+}
+
+func (t *Tokenizer) GetByteToUnicodeToken(b byte) int {
+	return t.unicodeByteToToken[b]
+}
+
+// GetPairRank returns the rank for a pair of tokens (a, b) and whether it exists
+func (t *Tokenizer) GetPairRank(a, b int) (int, bool) {
+	info, ok := t.pairLookup.Lookup(a, b)
+	if !ok {
+		return 0, false
+	}
+	rank := int(info >> 32)
+	return rank, true
+}
+
+// GetPairToken returns the merged token ID for a pair of tokens (a, b) and whether it exists
+func (t *Tokenizer) GetPairToken(a, b int) (int, bool) {
+	info, ok := t.pairLookup.Lookup(a, b)
+	if !ok {
+		return 0, false
+	}
+	tokenID := int(info & 0xFFFFFFFF)
+	return tokenID, true
 }
 
 // buildByteToToken constructs the [256]int lookup table that maps a single raw
@@ -196,6 +236,25 @@ func buildByteToToken(revVocab [][]byte) ([256]int, error) {
 		if !filled[b] {
 			return table, fmt.Errorf("no token found for raw bytes %d", int(b))
 		}
+	}
+
+	return table, nil
+}
+
+func buildUnicodeByteToToken(vocab map[string]int) ([256]int, error) {
+	encoder := buildCursedByteEncoder()
+	var table [256]int
+
+	for b := 0; b < 256; b++ {
+		r := encoder[byte(b)]
+		tokenStr := string(r)
+
+		id, ok := vocab[tokenStr]
+		if !ok {
+			return table, fmt.Errorf("no vocab entry for unicode token %q", tokenStr)
+		}
+
+		table[b] = id
 	}
 
 	return table, nil
@@ -335,6 +394,47 @@ func buildCursedByteDecoder() map[rune]byte {
 	}
 
 	return byteDecoder
+}
+
+// buildCursedByteEncoder mirrors buildCursedByteDecoder
+func buildCursedByteEncoder() map[byte]rune {
+
+	var bs []int
+	for b := 33; b <= 126; b++ {
+		bs = append(bs, b)
+	}
+	for b := 161; b <= 172; b++ {
+		bs = append(bs, b)
+	}
+	for b := 174; b <= 255; b++ {
+		bs = append(bs, b)
+	}
+
+	cs := make([]int, len(bs))
+	copy(cs, bs)
+
+	next := 256
+	for b := 0; b < 256; b++ {
+		found := false
+		for _, x := range bs {
+			if x == b {
+				found = true
+				break
+			}
+		}
+		if !found {
+			bs = append(bs, b)
+			cs = append(cs, next)
+			next++
+		}
+	}
+
+	byteEncoder := make(map[byte]rune, 256)
+	for i := range bs {
+		byteEncoder[byte(bs[i])] = rune(cs[i])
+	}
+
+	return byteEncoder
 }
 
 // packPair packs two token IDs into a uint64 for use as a map key

@@ -1,48 +1,360 @@
 package streaming_encoder_incremental
 
 import (
+	"fmt"
 	"github.com/bpetok/internal/tokenizer/core"
 )
+
+type heapInterface interface {
+	Push(c mergeCandidate)
+	Pop() (mergeCandidate, bool)
+	Empty() bool
+}
 
 type StreamingEncoderV2 struct {
 	tok *core.Tokenizer
 
-	// persistent linked list state
-	tokens  []int // token IDs
+	tokens  []int
 	prev    []int
 	next    []int
-	live    []uint32 // version per node
-	liveGen uint32   // monotonically increasing global counter
+	live    []uint32
+	liveGen uint32
 
-	// heap of merge candidates (incremental)
-	heap *mergeHeap
+	heap heapInterface
 
-	// pointer to the current tail index
 	head int
 	tail int
 
-	outBuf []int // output buffer for tokens
+	outBuf           []int
+	tailReserve      int
+	syntheticLengths map[int]int
 }
 
-// NewStreamingEncoderV2 creates a new incremental encoder instance.
 func NewStreamingEncoderV2(tok *core.Tokenizer) *StreamingEncoderV2 {
+	tok.UseUnicodeInitTokens = true
 	return &StreamingEncoderV2{
 		tok:     tok,
 		head:    -1,
 		tail:    -1,
 		liveGen: 1,
-		outBuf:  make([]int, 0, 128), // arbitrary initial cap
+		outBuf:  make([]int, 0, 128),
+		heap:    newMergeHeap(),
 	}
 }
 
-// Push ingests the next chunk of raw bytes, performs incremental merges, and returns any committed tokens.
 func (se *StreamingEncoderV2) Push(chunk []byte) []int {
-	// TODO: implement incremental append + merge frontier update + commit
-	return nil
+	newNodes := se.appendBytes(chunk)
+
+	if len(newNodes) == 0 {
+		return nil
+	}
+
+	se.seedAdjacency(newNodes)
+	fmt.Println("HEAP EMPTY AFTER seeding? ", se.heap.Empty())
+
+	se.runMerges()
+
+	out := make([]int, 0, 16)
+	se.commitPrefix(&out)
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
-// Flush finalizes all remaining tokens.
 func (se *StreamingEncoderV2) Flush() []int {
-	// TODO: commit all remaining live tokens
-	return nil
+	if se.head == -1 {
+		return nil
+	}
+
+	out := make([]int, 0, 16)
+	se.commitPrefix(&out)
+
+	buf := make([]byte, 0, 64)
+	for idx := se.head; idx != -1; idx = se.next[idx] {
+		tokID := se.tokens[idx]
+		buf = append(buf, se.tok.RevVocab[tokID]...)
+	}
+
+	if len(buf) > 0 {
+		rem := se.tok.EncodeOffline(buf)
+		out = append(out, rem...)
+	}
+
+	se.head = -1
+	se.tail = -1
+
+	se.heap = newMergeHeap()
+
+	return out
+}
+
+func (se *StreamingEncoderV2) appendBytes(chunk []byte) []int {
+	if len(chunk) == 0 {
+		return nil
+	}
+
+	count := len(chunk)
+	start := len(se.tokens)
+	end := start + count - 1
+
+	newIndices := make([]int, count)
+
+	se.tokens = append(se.tokens, make([]int, count)...)
+	se.prev = append(se.prev, make([]int, count)...)
+	se.next = append(se.next, make([]int, count)...)
+	se.live = append(se.live, make([]uint32, count)...)
+
+	for i := 0; i < count; i++ {
+		idx := start + i
+		newIndices[i] = idx
+
+		se.tokens[idx] = se.tok.GetByteToUnicodeToken(chunk[i])
+
+		se.liveGen++
+		se.live[idx] = se.liveGen
+	}
+
+	if se.tail == -1 {
+		for i := 0; i < count; i++ {
+			idx := start + i
+			if i == 0 {
+				se.prev[idx] = -1
+			} else {
+				se.prev[idx] = idx - 1
+			}
+			if i == count-1 {
+				se.next[idx] = -1
+			} else {
+				se.next[idx] = idx + 1
+			}
+		}
+
+		se.head = start
+		se.tail = end
+		return newIndices
+	}
+
+	first := start
+	se.next[se.tail] = first
+	se.prev[first] = se.tail
+
+	for i := 0; i < count; i++ {
+		idx := start + i
+
+		if i == 0 {
+
+			se.next[idx] = idx + 1
+		} else if i == count-1 {
+			se.prev[idx] = idx - 1
+			se.next[idx] = -1
+		} else {
+			se.prev[idx] = idx - 1
+			se.next[idx] = idx + 1
+		}
+	}
+
+	se.tail = end
+
+	return newIndices
+}
+
+func ifElse(cond bool, a, b int) int {
+	if cond {
+		return a
+	}
+	return b
+}
+
+func (se *StreamingEncoderV2) seedAdjacency(newNodes []int) {
+	if len(newNodes) == 0 {
+		return
+	}
+
+	first := newNodes[0]
+	if se.head != first {
+		left := se.prev[first]
+		if left != -1 {
+			se.maybeAddCandidate(left, first)
+		}
+	}
+
+	for i := 0; i+1 < len(newNodes); i++ {
+		left := newNodes[i]
+		right := newNodes[i+1]
+		se.maybeAddCandidate(left, right)
+	}
+}
+
+func (se *StreamingEncoderV2) maybeAddCandidate(i, j int) {
+
+	if i == -1 || j == -1 {
+		return
+	}
+
+	leftTok := se.tokens[i]
+	rightTok := se.tokens[j]
+
+	rank, ok := se.tok.GetPairRank(leftTok, rightTok)
+	if !ok {
+		return
+	}
+
+	se.heap.Push(mergeCandidate{
+		leftIndex:  i,
+		rightIndex: j,
+		rank:       rank,
+		liveLeft:   se.live[i],
+		liveRight:  se.live[j],
+	})
+}
+
+func (se *StreamingEncoderV2) runMerges() {
+	for {
+
+		cand, ok := se.heap.Pop()
+		if !ok {
+			return
+		}
+
+		if !se.isValidCandidate(cand) {
+			continue
+		}
+
+		se.performMerge(cand)
+
+		se.updateFrontierAfterMerge(cand)
+	}
+}
+
+func (se *StreamingEncoderV2) isValidCandidate(c mergeCandidate) bool {
+	i := c.leftIndex
+	j := c.rightIndex
+
+	if se.live[i] != c.liveLeft || se.live[j] != c.liveRight {
+		return false
+	}
+
+	if se.next[i] != j {
+		return false
+	}
+
+	leftTok := se.tokens[i]
+	rightTok := se.tokens[j]
+
+	rank, ok := se.tok.GetPairRank(leftTok, rightTok)
+	if !ok || rank != c.rank {
+		return false
+	}
+
+	return true
+}
+
+func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
+	i := c.leftIndex
+	j := c.rightIndex
+
+	k := se.prev[i]
+	l := se.next[j]
+
+	mergedID, ok := se.tok.GetPairToken(se.tokens[i], se.tokens[j])
+	if !ok {
+
+		return
+	}
+
+	se.tokens[i] = mergedID
+
+	se.prev[j] = -1
+	se.next[j] = -1
+
+	if k != -1 {
+		se.next[k] = i
+	}
+	se.prev[i] = k
+
+	se.next[i] = l
+	if l != -1 {
+		se.prev[l] = i
+	}
+
+	se.liveGen++
+	se.live[i] = se.liveGen
+
+	if se.head == j {
+		se.head = i
+	}
+	if se.tail == j {
+		se.tail = i
+	}
+}
+
+func (se *StreamingEncoderV2) updateFrontierAfterMerge(c mergeCandidate) {
+	i := c.leftIndex
+
+	k := se.prev[i]
+	l := se.next[i]
+
+	se.maybeAddCandidate(k, i)
+
+	se.maybeAddCandidate(i, l)
+}
+
+func (se *StreamingEncoderV2) commitPrefix(out *[]int) {
+	if se.head == -1 {
+		return
+	}
+
+	getTokenLen := func(tokID int) int {
+		if se.syntheticLengths != nil {
+			if len, ok := se.syntheticLengths[tokID]; ok {
+				return len
+			}
+		}
+		return se.tok.TokenLen(tokID)
+	}
+
+	totalLen := 0
+	for idx := se.head; idx != -1; idx = se.next[idx] {
+		tokID := se.tokens[idx]
+		totalLen += getTokenLen(tokID)
+	}
+
+	committed := 0
+	var lastCommitted int = -1
+
+	idx := se.head
+	for idx != -1 {
+		tokID := se.tokens[idx]
+		tokLen := getTokenLen(tokID)
+
+		remainingAfter := totalLen - (committed + tokLen)
+
+		if remainingAfter <= se.tailReserve {
+			break
+		}
+
+		*out = append(*out, tokID)
+		committed += tokLen
+		lastCommitted = idx
+
+		idx = se.next[idx]
+	}
+
+	if lastCommitted == -1 {
+		return
+	}
+
+	newHead := se.next[lastCommitted]
+
+	if newHead != -1 {
+		se.prev[newHead] = -1
+	}
+
+	se.head = newHead
+
+	if newHead == -1 {
+		se.tail = -1
+	}
 }

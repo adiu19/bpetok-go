@@ -1,3 +1,13 @@
 package streaming_encoder_incremental
 
-// Utility for managing prev/next adjacency updates will go here.
+func (se *StreamingEncoderV2) attachNode(i int) {
+
+}
+
+func (se *StreamingEncoderV2) isolateNode(i int) {
+
+}
+
+func (se *StreamingEncoderV2) updateLive(i int) {
+
+}
