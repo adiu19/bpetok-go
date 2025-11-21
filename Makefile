@@ -1,5 +1,6 @@
 GO       := go
 BINDIR   := bin
+GOMAXPROCS := 1
 
 CMDS := fetch_gpt2_tokenizer
 
@@ -48,6 +49,17 @@ bench-cpu:
 	go test -run '^$$' -bench BenchmarkEncodeOffline -benchmem -benchtime=10x -cpuprofile=cpu.out ./internal/tokenizer
 	@echo "Profile saved to cpu.out. View with: go tool pprof cpu.out"
 
+.PHONY: bench-streaming-trace-whole-chunk
+bench-streaming-trace-whole-chunk:
+	GOMAXPROCS=$(GOMAXPROCS)go test -run '^$$' -bench BenchmarkEncodeStreaming_WholeChunk -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer
+	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
+	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
+
+.PHONY: bench-streaming-trace-4kb-chunk
+bench-streaming-trace-4kb-chunk:
+	GOMAXPROCS=$(GOMAXPROCS) go test -run '^$$' -bench BenchmarkEncodeStreaming_4KBChunks -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer
+	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
+	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
 # Clean build artifacts
 .PHONY: clean
 clean:
