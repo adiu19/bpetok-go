@@ -26,7 +26,7 @@ func BenchmarkEncodeOffline(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
+func BenchmarkNaiveEncodeStreaming_WholeChunk(b *testing.B) {
 	tok := loadTestTokenizerB(b)
 	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
 
@@ -40,7 +40,7 @@ func BenchmarkEncodeStreaming_WholeChunk(b *testing.B) {
 	}
 }
 
-func BenchmarkEncodeStreaming_4KBChunks(b *testing.B) {
+func BenchmarkNaiveEncodeStreaming_4KBChunks(b *testing.B) {
 	tok := loadTestTokenizerB(b)
 	input := mustLoadBenchCorpus(b, "testdata/gpt2/bench_corpus.txt")
 

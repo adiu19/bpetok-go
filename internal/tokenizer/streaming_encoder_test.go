@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func encodeStreaming(t *testing.T, tok *Tokenizer, input []byte, chunkSizes []int) []int {
+func encodeStreamingNaive(t *testing.T, tok *Tokenizer, input []byte, chunkSizes []int) []int {
 	t.Helper()
 	es := NewEncoderState(tok)
 	var out []int
@@ -46,7 +46,7 @@ func encodeStreaming(t *testing.T, tok *Tokenizer, input []byte, chunkSizes []in
 	return out
 }
 
-func TestStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
+func TestNaiveStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
 	tok := loadTestTokenizer(t)
 
 	cases := []struct {
@@ -74,7 +74,7 @@ func TestStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
 			input := []byte(tc.s)
 
 			want := tok.EncodeOffline(input)
-			got := encodeStreaming(t, tok, input, chunks)
+			got := encodeStreamingNaive(t, tok, input, chunks)
 
 			if !equalIntSlices(want, got) {
 				t.Fatalf("case %q chunking %d: mismatch.\nwant: %v\ngot:  %v",
@@ -122,7 +122,7 @@ func TestStreamingMatchesGreedy_Randomized(t *testing.T) {
 		}
 
 		want := tok.EncodeOffline(input)
-		got := encodeStreaming(t, tok, input, chunkSizes)
+		got := encodeStreamingNaive(t, tok, input, chunkSizes)
 
 		if !equalIntSlices(want, got) {
 			t.Fatalf("random case %d: mismatch\ninput: %q\nchunks: %v\nwant: %v\ngot: %v",
