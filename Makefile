@@ -36,9 +36,13 @@ test-decode:
 	go test -v ./internal/tokenizer -run TestDecode -count=1
 
 
-.PHONY: test-streaming
-test-streaming:
-	go test -v ./internal/tokenizer -run TestStreaming -count=1
+.PHONY: test-streaming-naive
+test-streaming-naive:
+	go test -v ./internal/tokenizer/streaming_encoder_naive
+
+.PHONY: test-streaming-inc
+test-streaming-inc:
+	go test -v ./internal/tokenizer/streaming_encoder_incremental -count=1
 
 .PHONY: bench
 bench:
@@ -60,6 +64,8 @@ bench-naive-streaming-trace-4kb-chunk:
 	GOMAXPROCS=$(GOMAXPROCS) go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_4KBChunks -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer/streaming_encoder_naive
 	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
 	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
+
+
 # Clean build artifacts
 .PHONY: clean
 clean:

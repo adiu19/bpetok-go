@@ -22,4 +22,3 @@ func (t *Tokenizer) Decode(tokens []int) []byte {
 
 	return out
 }
-

@@ -58,4 +58,3 @@ func (pl *PairLookup) Lookup(a, b int) (uint64, bool) {
 	value, ok := pl.fallback[key]
 	return value, ok
 }
-

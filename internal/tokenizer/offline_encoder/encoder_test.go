@@ -141,4 +141,3 @@ func TestDecode_RoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch: got %q want %q", out, in)
 	}
 }
-

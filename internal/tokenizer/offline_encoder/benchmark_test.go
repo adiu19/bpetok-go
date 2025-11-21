@@ -39,4 +39,3 @@ func loadTestTokenizerB(b *testing.B) *core.Tokenizer {
 	}
 	return tok
 }
-
