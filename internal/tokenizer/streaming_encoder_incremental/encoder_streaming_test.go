@@ -1,10 +1,10 @@
 package streaming_encoder_incremental
 
 import (
+	"github.com/bpetok/internal/tokenizer/core"
+	"math/rand"
 	"reflect"
 	"testing"
-
-	"github.com/bpetok/internal/tokenizer/core"
 )
 
 type mockHeap struct {
@@ -26,6 +26,35 @@ func (h *mockHeap) Empty() bool                 { return len(h.items) == 0 }
 func (h *mockHeap) Reset() {
 	h.items = h.items[:0]
 }
+
+// -----------------------
+
+// spyHeapForFrontierTest wraps an existing heap to spy on Push calls
+type spyHeapForFrontierTest struct {
+	wrapped heapInterface
+	onPush  func(mergeCandidate)
+}
+
+func (s *spyHeapForFrontierTest) Push(c mergeCandidate) {
+	if s.onPush != nil {
+		s.onPush(c)
+	}
+	s.wrapped.Push(c)
+}
+
+func (s *spyHeapForFrontierTest) Pop() (mergeCandidate, bool) {
+	return s.wrapped.Pop()
+}
+
+func (s *spyHeapForFrontierTest) Empty() bool {
+	return s.wrapped.Empty()
+}
+
+func (s *spyHeapForFrontierTest) Reset() {
+	s.wrapped.Reset()
+}
+
+// ----------------------
 
 func setupTwoNodeEncoder(t *testing.T, left, right byte) (*StreamingEncoderV2, int, int) {
 	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
@@ -1502,6 +1531,239 @@ func TestStreamingE2E_TailReserveInvariant(t *testing.T) {
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("tail-reserve mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreaming_ListInvariants(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	input := "hello world this is a long-ish string for testing"
+	se.Push([]byte(input))
+
+	// Walk forward
+	forward := []int{}
+	seen := map[int]bool{}
+
+	idx := se.head
+	for idx != -1 {
+		if idx < 0 || idx >= len(se.tokens) {
+			t.Fatalf("out-of-bounds next pointer: %d", idx)
+		}
+		if seen[idx] {
+			t.Fatalf("cycle detected at %d", idx)
+		}
+		seen[idx] = true
+
+		forward = append(forward, idx)
+		idx = se.next[idx]
+	}
+
+	if len(forward) == 0 {
+		t.Fatalf("empty forward traversal")
+	}
+	if se.prev[se.head] != -1 {
+		t.Fatalf("head.prev != -1")
+	}
+	if se.tail != forward[len(forward)-1] {
+		t.Fatalf("tail mismatch: got %d want %d", se.tail, forward[len(forward)-1])
+	}
+	if se.next[se.tail] != -1 {
+		t.Fatalf("tail.next != -1")
+	}
+
+	// Walk backward
+	backward := []int{}
+	idx = se.tail
+	for idx != -1 {
+		backward = append(backward, idx)
+		idx = se.prev[idx]
+	}
+
+	// backward reversed must equal forward
+	for i := range forward {
+		if forward[i] != backward[len(backward)-1-i] {
+			t.Fatalf("bidirectional mismatch: forward=%v backward=%v", forward, backward)
+		}
+	}
+}
+
+func TestStreaming_FrontierConsistency(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	// Create a spy heap that tracks all Push calls
+	seen := map[[2]int]bool{}
+	originalHeap := se.heap
+
+	spyHeap := &spyHeapForFrontierTest{
+		wrapped: originalHeap,
+		onPush: func(c mergeCandidate) {
+			seen[[2]int{c.leftIndex, c.rightIndex}] = true
+		},
+	}
+	se.heap = spyHeap
+
+	// String chosen intentionally with dense merges: "aaaaa"
+	input := []byte("aaaaa")
+
+	se.Push(input)
+	se.Flush()
+
+	// Validate that:
+	//   For each merge that happened, only its two neighbors were added.
+	// This is indirect: we ensure no impossible (i,j) pairs appeared.
+	for pair := range seen {
+		i, j := pair[0], pair[1]
+		if i < 0 || j < 0 {
+			t.Fatalf("invalid pair pushed: %+v", pair)
+		}
+		if j != se.next[i] && i != se.prev[j] {
+			t.Fatalf("non-adjacent pair was added to heap: %v", pair)
+		}
+	}
+}
+
+func TestStreaming_FuzzOfflineEquivalence(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	for iter := 0; iter < 250; iter++ {
+		// Random UTF-8 text
+		n := 50 + rand.Intn(200)
+		runes := make([]rune, n)
+		for i := range runes {
+			runes[i] = rune(32 + rand.Intn(2000))
+		}
+		s := string(runes)
+
+		se := NewStreamingEncoderV2(tok)
+
+		// Push byte-by-byte to maximize stress
+		var out []int
+		for i := 0; i < len(s); i++ {
+			out = append(out, se.Push([]byte{s[i]})...)
+		}
+		out = append(out, se.Flush()...)
+
+		want := tok.EncodeOffline([]byte(s))
+
+		if !reflect.DeepEqual(out, want) {
+			t.Fatalf("fuzz mismatch:\ninput=%q\ngot  %v\nwant %v", s, out, want)
+		}
+	}
+}
+
+func TestStreaming_CrossBoundaryFuzzer(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	for iter := 0; iter < 100; iter++ {
+		// random input
+		n := 80 + rand.Intn(120)
+		data := make([]byte, n)
+		for i := range data {
+			data[i] = byte(32 + rand.Intn(90))
+		}
+
+		se := NewStreamingEncoderV2(tok)
+
+		// apply random chunking
+		out := []int{}
+		i := 0
+		for i < len(data) {
+			sz := 1 + rand.Intn(10)
+			end := i + sz
+			if end > len(data) {
+				end = len(data)
+			}
+			out = append(out, se.Push(data[i:end])...)
+			i = end
+		}
+		out = append(out, se.Flush()...)
+
+		want := tok.EncodeOffline(data)
+
+		if !reflect.DeepEqual(out, want) {
+			t.Fatalf("cross-boundary mismatch:\ninput=%q\ngot  %v\nwant %v", string(data), out, want)
+		}
+	}
+}
+
+func TestStreaming_TailReserveSweep(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	input := []byte("The quick brown fox jumped over the log while thinking about tokens")
+
+	for tailRes := 0; tailRes <= 10; tailRes++ {
+		se := NewStreamingEncoderV2(tok)
+		se.tailReserve = tailRes
+
+		// random push pattern
+		out := []int{}
+		i := 0
+		for i < len(input) {
+			n := 1 + rand.Intn(4)
+			end := i + n
+			if end > len(input) {
+				end = len(input)
+			}
+			out = append(out, se.Push(input[i:end])...)
+			i = end
+		}
+
+		// final flush
+		out = append(out, se.Flush()...)
+
+		// Validate tail invariants via flush output; matches offline
+		want := tok.EncodeOffline(input)
+		if !reflect.DeepEqual(out, want) {
+			t.Fatalf("tailReserve=%d mismatch:\ngot  %v\nwant %v", tailRes, out, want)
+		}
+	}
+}
+
+func TestStreaming_Stress1MB(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	// 1 MB of mostly-printable data
+	data := make([]byte, 1<<20)
+	for i := range data {
+		data[i] = byte(32 + rand.Intn(90))
+	}
+
+	out := []int{}
+	const chunk = 4096
+	for i := 0; i < len(data); i += chunk {
+		end := i + chunk
+		if end > len(data) {
+			end = len(data)
+		}
+		out = append(out, se.Push(data[i:end])...)
+	}
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline(data)
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("1MB stress mismatch: got=%d want=%d tokens", len(out), len(want))
 	}
 }
 

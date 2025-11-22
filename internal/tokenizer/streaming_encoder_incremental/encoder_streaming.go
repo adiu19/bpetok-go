@@ -60,7 +60,6 @@ func (se *StreamingEncoderV2) Push(chunk []byte) []int {
 
 	if oldTail != -1 {
 		se.maybeAddCandidate(oldTail, newNodes[0])
-		se.maybeAddCandidate(newNodes[0], oldTail)
 	}
 
 	se.seedAdjacency(newNodes)
@@ -168,13 +167,15 @@ func (se *StreamingEncoderV2) appendBytes(chunk []byte) []int {
 
 	for i := 0; i < count; i++ {
 		idx := start + i
-		if i == 0 {
-			se.next[idx] = idx + 1
-		} else if i == count-1 {
-			se.prev[idx] = idx - 1
+		if i == count-1 {
 			se.next[idx] = -1
+			if i > 0 {
+				se.prev[idx] = idx - 1
+			}
 		} else {
-			se.prev[idx] = idx - 1
+			if i > 0 {
+				se.prev[idx] = idx - 1
+			}
 			se.next[idx] = idx + 1
 		}
 	}
@@ -289,20 +290,8 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 	i := c.leftIndex
 	j := c.rightIndex
 
-	if i < 0 || j < 0 ||
-		i >= len(se.tokens) || j >= len(se.tokens) ||
-		i >= len(se.next) || j >= len(se.next) ||
-		i >= len(se.prev) || j >= len(se.prev) {
-		return
-	}
-
-	if se.live[i] == 0 || se.live[j] == 0 {
-		return
-	}
-	if se.next[i] != j || se.prev[j] != i {
-		return
-	}
-
+	// Note: This is called from runMerges after isValidCandidate, which already
+	// validated bounds, live states, and adjacency. We trust that validation here.
 	k := se.prev[i]
 	l := se.next[j]
 
