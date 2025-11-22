@@ -41,6 +41,237 @@ func setupTwoNodeEncoder(t *testing.T, left, right byte) (*StreamingEncoderV2, i
 	return se, nodes[0], nodes[1]
 }
 
+func TestPerformMerge_MiddleOfList(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+
+	indices := newSyntheticList(se, []int{1, 1, 1})
+	se.tokens[indices[0]] = tok.GetByteToToken('h')
+	se.tokens[indices[1]] = tok.GetByteToToken('e')
+	se.tokens[indices[2]] = tok.GetByteToToken('l')
+
+	left := indices[0]
+	right := indices[1]
+
+	mergedID, ok := tok.GetPairToken(se.tokens[left], se.tokens[right])
+	if !ok {
+		t.Fatalf("test assumption: 'h' 'e' must be mergeable")
+	}
+
+	cand := mergeCandidate{
+		leftIndex:  left,
+		rightIndex: right,
+		rank:       0,
+		liveLeft:   se.live[left],
+		liveRight:  se.live[right],
+	}
+
+	se.performMerge(cand)
+
+	if se.tokens[left] != mergedID {
+		t.Fatalf("left node should contain merged tokenID %d, got %d", mergedID, se.tokens[left])
+	}
+
+	if se.live[right] != 0 {
+		t.Fatalf("right node should be dead (live=0), got %d", se.live[right])
+	}
+
+	if se.next[left] != indices[2] {
+		t.Fatalf("expected merged node next=%d, got %d", indices[2], se.next[left])
+	}
+	if se.prev[indices[2]] != left {
+		t.Fatalf("expected C.prev = left")
+	}
+
+	if se.head != left {
+		t.Fatalf("expected head=%d got %d", left, se.head)
+	}
+}
+
+func TestPerformMerge_AtTail(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+
+	indices := newSyntheticList(se, []int{1, 1})
+	se.tokens[indices[0]] = tok.GetByteToToken('l')
+	se.tokens[indices[1]] = tok.GetByteToToken('o')
+
+	left := indices[0]
+	right := indices[1]
+
+	mergedID, ok := tok.GetPairToken(se.tokens[left], se.tokens[right])
+	if !ok {
+		t.Fatalf("test assumption: 'l' 'o' must be mergeable")
+	}
+
+	cand := mergeCandidate{
+		leftIndex:  left,
+		rightIndex: right,
+		liveLeft:   se.live[left],
+		liveRight:  se.live[right],
+	}
+
+	se.performMerge(cand)
+
+	if se.tokens[left] != mergedID {
+		t.Fatalf("expected merged token=%d, got %d", mergedID, se.tokens[left])
+	}
+
+	if se.live[right] != 0 {
+		t.Fatalf("expected right node dead after merge")
+	}
+
+	if se.tail != left {
+		t.Fatalf("expected tail=%d, got %d", left, se.tail)
+	}
+
+	if se.next[left] != -1 {
+		t.Fatalf("expected merged tail to have next=-1")
+	}
+}
+
+func TestPerformMerge_TokenIdCorrectness(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+	indices := newSyntheticList(se, []int{1, 1})
+
+	se.tokens[indices[0]] = tok.GetByteToToken('e')
+	se.tokens[indices[1]] = tok.GetByteToToken('r')
+
+	mergedID, ok := tok.GetPairToken(se.tokens[indices[0]], se.tokens[indices[1]])
+	if !ok {
+		t.Fatalf("'er' must be mergeable")
+	}
+
+	se.performMerge(mergeCandidate{
+		leftIndex:  indices[0],
+		rightIndex: indices[1],
+		liveLeft:   se.live[indices[0]],
+		liveRight:  se.live[indices[1]],
+	})
+
+	if se.tokens[indices[0]] != mergedID {
+		t.Fatalf("expected merged token %d, got %d", mergedID, se.tokens[indices[0]])
+	}
+}
+
+func TestPerformMerge_NoOverDelete(t *testing.T) {
+	tok, _ := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	se := NewStreamingEncoderV2(tok)
+
+	indices := newSyntheticList(se, []int{1, 1, 1})
+
+	se.tokens[indices[0]] = tok.GetByteToToken('t')
+	se.tokens[indices[1]] = tok.GetByteToToken('h')
+	se.tokens[indices[2]] = tok.GetByteToToken('e')
+
+	_, ok := tok.GetPairToken(se.tokens[indices[0]], se.tokens[indices[1]])
+	if !ok {
+		t.Skip("GPT2 merges might differ; skipping test if 'th' is not mergeable")
+	}
+
+	se.performMerge(mergeCandidate{
+		leftIndex:  indices[0],
+		rightIndex: indices[1],
+		liveLeft:   se.live[indices[0]],
+		liveRight:  se.live[indices[1]],
+	})
+
+	if se.live[indices[2]] == 0 {
+		t.Fatalf("right neighbor incorrectly removed")
+	}
+	if se.live[indices[0]] == 0 {
+		t.Fatalf("left node should stay alive")
+	}
+	if se.live[indices[1]] != 0 {
+		t.Fatalf("middle node should be dead")
+	}
+}
+
+func TestAppendBytes_ListIntegrity(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+
+	chunk1 := []byte("hel")
+	nodes1 := se.appendBytes(chunk1)
+
+	if !reflect.DeepEqual(nodes1, []int{0, 1, 2}) {
+		t.Fatalf("nodes1 mismatch: got %v", nodes1)
+	}
+
+	wantNext1 := []int{1, 2, -1}
+	wantPrev1 := []int{-1, 0, 1}
+	for i := 0; i < 3; i++ {
+		if se.next[i] != wantNext1[i] {
+			t.Fatalf("next[%d] = %d, want %d", i, se.next[i], wantNext1[i])
+		}
+		if se.prev[i] != wantPrev1[i] {
+			t.Fatalf("prev[%d] = %d, want %d", i, se.prev[i], wantPrev1[i])
+		}
+	}
+	if se.head != 0 || se.tail != 2 {
+		t.Fatalf("wrong head/tail after chunk1: head=%d tail=%d", se.head, se.tail)
+	}
+
+	chunk2 := []byte("lo")
+	nodes2 := se.appendBytes(chunk2)
+
+	if !reflect.DeepEqual(nodes2, []int{3, 4}) {
+		t.Fatalf("nodes2 mismatch: got %v", nodes2)
+	}
+
+	wantNext2 := []int{1, 2, 3, 4, -1}
+	wantPrev2 := []int{-1, 0, 1, 2, 3}
+
+	for i := 0; i < 5; i++ {
+		if se.next[i] != wantNext2[i] {
+			t.Fatalf("after chunk2: next[%d] = %d, want %d", i, se.next[i], wantNext2[i])
+		}
+		if se.prev[i] != wantPrev2[i] {
+			t.Fatalf("after chunk2: prev[%d] = %d, want %d", i, se.prev[i], wantPrev2[i])
+		}
+	}
+	if se.head != 0 || se.tail != 4 {
+		t.Fatalf("wrong head/tail after chunk2: head=%d tail=%d", se.head, se.tail)
+	}
+
+	wantTokens := []int{
+		tok.GetByteToToken('h'),
+		tok.GetByteToToken('e'),
+		tok.GetByteToToken('l'),
+		tok.GetByteToToken('l'),
+		tok.GetByteToToken('o'),
+	}
+
+	gotTokens := []int{
+		se.tokens[0],
+		se.tokens[1],
+		se.tokens[2],
+		se.tokens[3],
+		se.tokens[4],
+	}
+
+	if !reflect.DeepEqual(gotTokens, wantTokens) {
+		t.Fatalf("token mismatch:\n got  %v\n want %v", gotTokens, wantTokens)
+	}
+}
+
 func TestCommitPrefix_NoCommit(t *testing.T) {
 	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
 	if err != nil {
@@ -1066,6 +1297,60 @@ func TestStreamingE2E_SimpleTwoChunk(t *testing.T) {
 	out := []int{}
 	out = append(out, se.Push([]byte(c1))...)
 	out = append(out, se.Push([]byte(c2))...)
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(full))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_MultiChunk_NoCrossBoundaryMerges(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+
+	full := "XYZ123"
+	c1 := "XYZ"
+	c2 := "123"
+
+	out := []int{}
+	out = append(out, se.Push([]byte(c1))...)
+	out = append(out, se.Push([]byte(c2))...)
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(full))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_MultiChunk_WithCrossBoundaryMerges(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+
+	se := NewStreamingEncoderV2(tok)
+
+	full := "hello world"
+
+	chunks := []string{
+		"hell",
+		"o ",
+		"wo",
+		"rld",
+	}
+
+	out := []int{}
+	for _, c := range chunks {
+		out = append(out, se.Push([]byte(c))...)
+	}
 	out = append(out, se.Flush()...)
 
 	want := tok.EncodeOffline([]byte(full))

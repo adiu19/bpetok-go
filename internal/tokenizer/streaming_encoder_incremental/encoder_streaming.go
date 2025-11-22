@@ -33,28 +33,52 @@ func NewStreamingEncoderV2(tok *core.Tokenizer) *StreamingEncoderV2 {
 	tok.UseUnicodeInitTokens = true
 	maxRank := tok.GetMaxRank()
 	return &StreamingEncoderV2{
-		tok:     tok,
-		head:    -1,
-		tail:    -1,
-		liveGen: 1,
-		outBuf:  make([]int, 0, 128),
-		heap:    newMergeHeapWithMaxRank(maxRank),
+		tok:         tok,
+		head:        -1,
+		tail:        -1,
+		liveGen:     1,
+		outBuf:      make([]int, 0, 128),
+		heap:        newMergeHeapWithMaxRank(maxRank),
+		tailReserve: tok.MaxTokenByteLen - 1,
 	}
 }
 
 func (se *StreamingEncoderV2) Push(chunk []byte) []int {
-	newNodes := se.appendBytes(chunk)
+	if len(chunk) == 0 {
+		return nil
+	}
 
+	oldTail := se.tail
+
+	newNodes := se.appendBytes(chunk)
 	if len(newNodes) == 0 {
 		return nil
+	}
+
+	if oldTail != -1 {
+		se.maybeAddCandidate(oldTail, newNodes[0])
+		se.maybeAddCandidate(newNodes[0], oldTail)
 	}
 
 	se.seedAdjacency(newNodes)
 
 	se.runMerges()
 
-	out := make([]int, 0, 16)
+	out := []int{}
 	se.commitPrefix(&out)
+
+	if se.tail != -1 {
+		firstLive := -1
+		for _, idx := range newNodes {
+			if se.live[idx] != 0 {
+				firstLive = idx
+				break
+			}
+		}
+		if firstLive != -1 {
+			se.maybeAddCandidate(se.tail, firstLive)
+		}
+	}
 
 	if len(out) == 0 {
 		return nil
@@ -109,7 +133,7 @@ func (se *StreamingEncoderV2) appendBytes(chunk []byte) []int {
 		idx := start + i
 		newIndices[i] = idx
 
-		se.tokens[idx] = se.tok.GetByteToUnicodeToken(chunk[i])
+		se.tokens[idx] = se.tok.GetByteToInitialToken(chunk[i])
 
 		se.liveGen++
 		se.live[idx] = se.liveGen
@@ -129,7 +153,6 @@ func (se *StreamingEncoderV2) appendBytes(chunk []byte) []int {
 				se.next[idx] = idx + 1
 			}
 		}
-
 		se.head = start
 		se.tail = end
 		return newIndices
@@ -141,9 +164,7 @@ func (se *StreamingEncoderV2) appendBytes(chunk []byte) []int {
 
 	for i := 0; i < count; i++ {
 		idx := start + i
-
 		if i == 0 {
-
 			se.next[idx] = idx + 1
 		} else if i == count-1 {
 			se.prev[idx] = idx - 1
@@ -187,7 +208,6 @@ func (se *StreamingEncoderV2) seedAdjacency(newNodes []int) {
 }
 
 func (se *StreamingEncoderV2) maybeAddCandidate(i, j int) {
-
 	if i == -1 || j == -1 {
 		return
 	}
@@ -211,7 +231,6 @@ func (se *StreamingEncoderV2) maybeAddCandidate(i, j int) {
 
 func (se *StreamingEncoderV2) runMerges() {
 	for {
-
 		cand, ok := se.heap.Pop()
 		if !ok {
 			return
@@ -259,12 +278,14 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 
 	mergedID, ok := se.tok.GetPairToken(se.tokens[i], se.tokens[j])
 	if !ok {
-
 		return
 	}
-
 	se.tokens[i] = mergedID
 
+	se.liveGen++
+	se.live[i] = se.liveGen
+
+	se.live[j] = 0
 	se.prev[j] = -1
 	se.next[j] = -1
 
@@ -277,9 +298,6 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 	if l != -1 {
 		se.prev[l] = i
 	}
-
-	se.liveGen++
-	se.live[i] = se.liveGen
 
 	if se.head == j {
 		se.head = i
