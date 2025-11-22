@@ -65,6 +65,12 @@ bench-naive-streaming-trace-4kb-chunk:
 	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
 	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
 
+.PHONY: bench-naive-streaming-trace-8parallel-4kb-chunk
+bench-naive-streaming-trace-8parallel-4kb-chunk:
+	GOMAXPROCS=8 go test -run '^$$' -bench BenchmarkNaiveEncodeStreaming_8Parallel_4KBChunks -benchmem -benchtime=10x -trace=trace.out -cpuprofile=cpu.out ./internal/tokenizer/streaming_encoder_naive
+	@echo "Trace saved to trace.out. View with: go tool trace trace.out"
+	@echo "CPU profile saved to cpu.out. View with: go tool pprof cpu.out"
+
 
 # Clean build artifacts
 .PHONY: clean
