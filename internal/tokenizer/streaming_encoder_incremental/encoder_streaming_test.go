@@ -23,6 +23,9 @@ func (h *mockHeap) Push(c mergeCandidate) {
 
 func (h *mockHeap) Pop() (mergeCandidate, bool) { return mergeCandidate{}, false }
 func (h *mockHeap) Empty() bool                 { return len(h.items) == 0 }
+func (h *mockHeap) Reset() {
+	h.items = h.items[:0]
+}
 
 func setupTwoNodeEncoder(t *testing.T, left, right byte) (*StreamingEncoderV2, int, int) {
 	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
@@ -1357,6 +1360,148 @@ func TestStreamingE2E_MultiChunk_WithCrossBoundaryMerges(t *testing.T) {
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_ByteByByte(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	input := "hello world"
+
+	out := []int{}
+	for i := 0; i < len(input); i++ {
+		out = append(out, se.Push([]byte{input[i]})...)
+	}
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(input))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("byte-by-byte mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_RandomChunkSplits(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	input := "The quick brown fox jumps over the lazy dog"
+
+	splits := []int{1, 3, 2, 5, 4, 1, 6, 3, 10, 2, 8, 1}
+
+	out := []int{}
+	i := 0
+	for _, n := range splits {
+		if i >= len(input) {
+			break
+		}
+		end := i + n
+		if end > len(input) {
+			end = len(input)
+		}
+		out = append(out, se.Push([]byte(input[i:end]))...)
+		i = end
+	}
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(input))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("random-chunk mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_SpaceMerges(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	out := []int{}
+	out = append(out, se.Push([]byte("The"))...)
+	out = append(out, se.Push([]byte(" qu"))...)
+	out = append(out, se.Push([]byte("ick"))...)
+	out = append(out, se.Push([]byte(" brown"))...)
+	out = append(out, se.Push([]byte(" fox"))...)
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte("The quick brown fox"))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("space-merge mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+func TestStreamingE2E_UnicodeBoundary(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	input := "Héllo 🌍"
+
+	out := []int{}
+	out = append(out, se.Push([]byte("Hé"))...)
+	out = append(out, se.Push([]byte("ll"))...)
+	out = append(out, se.Push([]byte("o "))...)
+	out = append(out, se.Push([]byte("🌍"))...)
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(input))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("unicode-boundary mismatch:\ngot  %v\nwant %v", out, want)
+	}
+}
+
+func TestStreamingE2E_FlushOnly(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	se.Push([]byte("hello "))
+	got := se.Flush()
+	want := tok.EncodeOffline([]byte("hello "))
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("flush mismatch:\ngot %v\nwant %v", got, want)
+	}
+}
+
+func TestStreamingE2E_TailReserveInvariant(t *testing.T) {
+	tok, err := core.LoadTokenizerFromFiles("../testdata/gpt2/vocab.json", "../testdata/gpt2/merges.txt")
+	if err != nil {
+		t.Fatalf("load tokenizer: %v", err)
+	}
+	se := NewStreamingEncoderV2(tok)
+
+	input := "hello world!!!"
+
+	// Push in tiny pieces to force long live tail
+	out := []int{}
+	out = append(out, se.Push([]byte("hel"))...)
+	out = append(out, se.Push([]byte("lo"))...)
+	out = append(out, se.Push([]byte(" w"))...)
+	out = append(out, se.Push([]byte("or"))...)
+	out = append(out, se.Push([]byte("ld"))...)
+	out = append(out, se.Push([]byte("!!"))...)
+	out = append(out, se.Push([]byte("!"))...)
+	out = append(out, se.Flush()...)
+
+	want := tok.EncodeOffline([]byte(input))
+
+	if !reflect.DeepEqual(out, want) {
+		t.Fatalf("tail-reserve mismatch:\ngot  %v\nwant %v", out, want)
 	}
 }
 

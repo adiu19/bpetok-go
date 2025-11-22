@@ -69,3 +69,12 @@ func (h *mergeHeap) Pop() (mergeCandidate, bool) {
 func (h *mergeHeap) Empty() bool {
 	return h.totalCount == 0
 }
+
+func (h *mergeHeap) Reset() {
+	for i := range h.buckets {
+		h.buckets[i] = h.buckets[i][:0]
+	}
+
+	h.totalCount = 0
+	h.current = 0
+}

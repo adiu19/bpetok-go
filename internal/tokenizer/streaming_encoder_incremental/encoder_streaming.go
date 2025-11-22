@@ -8,6 +8,7 @@ type heapInterface interface {
 	Push(c mergeCandidate)
 	Pop() (mergeCandidate, bool)
 	Empty() bool
+	Reset()
 }
 
 type StreamingEncoderV2 struct {
@@ -48,6 +49,8 @@ func (se *StreamingEncoderV2) Push(chunk []byte) []int {
 		return nil
 	}
 
+	se.heap.Reset()
+
 	oldTail := se.tail
 
 	newNodes := se.appendBytes(chunk)
@@ -65,7 +68,8 @@ func (se *StreamingEncoderV2) Push(chunk []byte) []int {
 	se.runMerges()
 
 	out := []int{}
-	se.commitPrefix(&out)
+
+	se.commitStablePrefix(&out)
 
 	if se.tail != -1 {
 		firstLive := -1
@@ -250,19 +254,31 @@ func (se *StreamingEncoderV2) isValidCandidate(c mergeCandidate) bool {
 	i := c.leftIndex
 	j := c.rightIndex
 
+	if i < 0 || j < 0 ||
+		i >= len(se.tokens) || j >= len(se.tokens) ||
+		i >= len(se.next) || j >= len(se.next) ||
+		i >= len(se.prev) || j >= len(se.prev) {
+		return false
+	}
+
+	if se.live[i] == 0 || se.live[j] == 0 {
+		return false
+	}
+
+	if se.next[i] != j || se.prev[j] != i {
+		return false
+	}
+
 	if se.live[i] != c.liveLeft || se.live[j] != c.liveRight {
 		return false
 	}
 
-	if se.next[i] != j {
+	rank, ok := se.tok.GetPairRank(se.tokens[i], se.tokens[j])
+	if !ok {
 		return false
 	}
 
-	leftTok := se.tokens[i]
-	rightTok := se.tokens[j]
-
-	rank, ok := se.tok.GetPairRank(leftTok, rightTok)
-	if !ok || rank != c.rank {
+	if rank != c.rank {
 		return false
 	}
 
@@ -273,6 +289,20 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 	i := c.leftIndex
 	j := c.rightIndex
 
+	if i < 0 || j < 0 ||
+		i >= len(se.tokens) || j >= len(se.tokens) ||
+		i >= len(se.next) || j >= len(se.next) ||
+		i >= len(se.prev) || j >= len(se.prev) {
+		return
+	}
+
+	if se.live[i] == 0 || se.live[j] == 0 {
+		return
+	}
+	if se.next[i] != j || se.prev[j] != i {
+		return
+	}
+
 	k := se.prev[i]
 	l := se.next[j]
 
@@ -280,8 +310,8 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 	if !ok {
 		return
 	}
-	se.tokens[i] = mergedID
 
+	se.tokens[i] = mergedID
 	se.liveGen++
 	se.live[i] = se.liveGen
 
@@ -296,7 +326,9 @@ func (se *StreamingEncoderV2) performMerge(c mergeCandidate) {
 
 	se.next[i] = l
 	if l != -1 {
-		se.prev[l] = i
+		if se.prev[l] == j {
+			se.prev[l] = i
+		}
 	}
 
 	if se.head == j {
@@ -316,6 +348,14 @@ func (se *StreamingEncoderV2) updateFrontierAfterMerge(c mergeCandidate) {
 	se.maybeAddCandidate(k, i)
 
 	se.maybeAddCandidate(i, l)
+}
+
+func (se *StreamingEncoderV2) commitStablePrefix(out *[]int) {
+	if se.tailReserve > 0 {
+		return
+	}
+
+	se.commitPrefix(out)
 }
 
 func (se *StreamingEncoderV2) commitPrefix(out *[]int) {
