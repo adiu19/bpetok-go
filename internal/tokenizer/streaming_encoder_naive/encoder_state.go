@@ -2,7 +2,7 @@ package streaming_encoder_naive
 
 import "github.com/bpetok/internal/tokenizer/core"
 
-// EncoderState implements a NAIVE (greedy) streaming encoder by buffering input bytes
+// NaiveStreamingEncoderState implements a NAIVE (greedy) streaming encoder by buffering input bytes
 // and greedily flushing any prefix that is guaranteed not to participate in
 // future merges (based off of the max token size in our vocab). The final lMax-1 bytes are held back as a safety margin so
 // merges that span chunk boundaries are preserved.
@@ -12,9 +12,16 @@ type NaiveStreamingEncoderState struct {
 
 	buf    []byte
 	outBuf []int
+
+	// optimization flags
+	optPreAllocScratch bool
+	optFlattenLookup   bool
+	optHotLoopTighten  bool
+	optOutBufReuse     bool
+	optNoCopyReturn    bool
 }
 
-// NewNaiveStreamingEncoderState returns a new instance of the encoder state.
+// NewNaiveStreamingEncoderState returns a new instance of the encoder state with opt params disabled.
 func NewNaiveStreamingEncoderState(t *core.Tokenizer) *NaiveStreamingEncoderState {
 	tail := 0
 	if t.MaxTokenByteLen > 0 {
@@ -22,8 +29,31 @@ func NewNaiveStreamingEncoderState(t *core.Tokenizer) *NaiveStreamingEncoderStat
 	}
 
 	return &NaiveStreamingEncoderState{
-		tok:         t,
-		tailReserve: tail,
+		tok:                t,
+		tailReserve:        tail,
+		optPreAllocScratch: false,
+		optFlattenLookup:   false,
+		optHotLoopTighten:  false,
+		optOutBufReuse:     false,
+		optNoCopyReturn:    false,
+	}
+}
+
+// NewNaiveStreamingEncoderStateWithOpts returns a new instance of the encoder state with opt params.
+func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch bool, optFlattenLookup bool, optHotLoopTighten bool, optOutBufReuse bool, optNoCopyReturn bool) *NaiveStreamingEncoderState {
+	tail := 0
+	if t.MaxTokenByteLen > 0 {
+		tail = t.MaxTokenByteLen - 1
+	}
+
+	return &NaiveStreamingEncoderState{
+		tok:                t,
+		tailReserve:        tail,
+		optPreAllocScratch: optPreAllocScratch,
+		optFlattenLookup:   optFlattenLookup,
+		optHotLoopTighten:  optHotLoopTighten,
+		optOutBufReuse:     optOutBufReuse,
+		optNoCopyReturn:    optNoCopyReturn,
 	}
 }
 
