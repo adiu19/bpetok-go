@@ -57,6 +57,17 @@ func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch
 	}
 }
 
+// returnOut returns the output buffer - either copied or via a reference pointer depending on our flags
+func (st *NaiveStreamingEncoderState) returnOut() []int {
+	if st.optNoCopyReturn {
+		return st.outBuf
+	}
+
+	out := make([]int, len(st.outBuf))
+	copy(out, st.outBuf)
+	return out
+}
+
 // Push consumes the next chunk of raw bytes and emits any finalized tokens.
 func (st *NaiveStreamingEncoderState) Push(chunk []byte) []int {
 	st.outBuf = st.outBuf[:0]
