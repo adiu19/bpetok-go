@@ -7,6 +7,8 @@ import "github.com/bpetok/internal/tokenizer/core"
 // future merges (based off of the max token size in our vocab). The final lMax-1 bytes are held back as a safety margin so
 // merges that span chunk boundaries are preserved.
 type NaiveStreamingEncoderState struct {
+	core.BaseEncoderState
+
 	tok         *core.Tokenizer
 	tailReserve int
 
@@ -93,7 +95,7 @@ func (st *NaiveStreamingEncoderState) Push(chunk []byte) []int {
 func (st *NaiveStreamingEncoderState) Flush() []int {
 	st.outBuf = st.outBuf[:0]
 	if len(st.buf) > 0 {
-		tokens := st.tok.EncodeOffline(st.buf)
+		tokens := st.tok.EncodeOffline(st.buf, &st.BaseEncoderState)
 		st.outBuf = append(st.outBuf, tokens...)
 		st.buf = st.buf[:0]
 	}
@@ -111,7 +113,7 @@ func (st *NaiveStreamingEncoderState) emitCommitted() {
 		return
 	}
 
-	tokens := st.tok.EncodeOffline(st.buf)
+	tokens := st.tok.EncodeOffline(st.buf, &st.BaseEncoderState)
 
 	consumed := 0
 	for _, id := range tokens {

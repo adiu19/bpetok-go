@@ -4,8 +4,10 @@ import (
 	"github.com/bpetok/internal/utils"
 )
 
-// EncodeOffline takes a sequence of bytes and converts them to sequence of tokens
-func (t *Tokenizer) EncodeOffline(input []byte) []int {
+type BaseEncoderState struct {
+}
+
+func (t *Tokenizer) EncodeOffline(input []byte, state *BaseEncoderState) []int {
 	n := len(input)
 	if n == 0 {
 		return nil

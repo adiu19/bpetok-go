@@ -35,7 +35,7 @@ func TestOfflineEncodeSingleByteCoverage(t *testing.T) {
 
 	for b := 0; b < 256; b++ {
 		in := []byte{byte(b)}
-		ids := tok.EncodeOffline(in)
+		ids := tok.EncodeOffline(in, nil)
 
 		if len(ids) != 1 {
 			t.Fatalf("byte 0x%02x: expected 1 token, got %d", b, len(ids))
@@ -54,7 +54,7 @@ func TestOffline_MinimalMergeTerminates(t *testing.T) {
 	// Get a merge pair from the tokenizer
 	// We'll need to access pairToken, but since it's unexported, we'll test indirectly
 	in := []byte(" the")
-	ids := tok.EncodeOffline(in)
+	ids := tok.EncodeOffline(in, nil)
 	if len(ids) == 0 {
 		t.Fatalf("expected at least one token")
 	}
@@ -67,7 +67,7 @@ func TestOfflineEncodePairMergesCollapseToSingleToken_Small(t *testing.T) {
 	N := 2
 	in := strings.Repeat(base, N)
 
-	ids := tok.EncodeOffline([]byte(in))
+	ids := tok.EncodeOffline([]byte(in, nil))
 	if len(ids) == 0 {
 		t.Fatalf("empty encoding for repeated %q", base)
 	}
@@ -88,7 +88,7 @@ func TestOfflineEncodeRoundTripRandom(t *testing.T) {
 			t.Fatalf("rand.Read: %v", err)
 		}
 
-		ids := tok.EncodeOffline(buf)
+		ids := tok.EncodeOffline(buf, nil)
 		round := tok.Decode(ids)
 
 		if string(round) != string(buf) {
@@ -106,7 +106,7 @@ func TestOffline_ByteWeirdness(t *testing.T) {
 		[]byte("💥🔥 the 💥"), // multibyte UTF-8
 	}
 	for _, in := range cases {
-		ids := tok.EncodeOffline(in)
+		ids := tok.EncodeOffline(in, nil)
 		out := tok.Decode(ids)
 		if !bytes.Equal(out, in) {
 			t.Fatalf("roundtrip mismatch for %q", in)
@@ -117,8 +117,8 @@ func TestOffline_ByteWeirdness(t *testing.T) {
 func TestOffline_Determinism(t *testing.T) {
 	tok := loadTestTokenizer(t)
 	in := []byte("determinism determinism determinism")
-	a := tok.EncodeOffline(in)
-	b := tok.EncodeOffline(in)
+	a := tok.EncodeOffline(in, nil)
+	b := tok.EncodeOffline(in, nil)
 	if fmt.Sprint(a) != fmt.Sprint(b) {
 		t.Fatalf("nondeterministic")
 	}
@@ -126,7 +126,7 @@ func TestOffline_Determinism(t *testing.T) {
 	if out := tok.Decode(a); string(out) != string(in) {
 		t.Fatalf("roundtrip")
 	}
-	c := tok.EncodeOffline(tok.Decode(a))
+	c := tok.EncodeOffline(tok.Decode(a, nil))
 	if fmt.Sprint(a) != fmt.Sprint(c) {
 		t.Fatalf("idempotence broken")
 	}
@@ -135,7 +135,7 @@ func TestOffline_Determinism(t *testing.T) {
 func TestDecode_RoundTrip(t *testing.T) {
 	tok := loadTestTokenizer(t)
 	in := []byte("quick test: the cat sat")
-	ids := tok.EncodeOffline(in)
+	ids := tok.EncodeOffline(in, nil)
 	out := tok.Decode(ids)
 	if string(out) != string(in) {
 		t.Fatalf("round-trip mismatch: got %q want %q", out, in)

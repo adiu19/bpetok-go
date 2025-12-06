@@ -94,7 +94,7 @@ func TestNaiveStreamingMatchesGreedy_SimpleChunkings(t *testing.T) {
 		for i, chunks := range chunkings {
 			input := []byte(tc.s)
 
-			want := tok.EncodeOffline(input)
+			want := tok.EncodeOffline(input, nil)
 			got := encodeStreamingNaive(t, tok, input, chunks)
 
 			if !equalIntSlices(want, got) {
@@ -142,7 +142,7 @@ func TestNaiveStreamingMatchesGreedy_Randomized(t *testing.T) {
 			}
 		}
 
-		want := tok.EncodeOffline(input)
+		want := tok.EncodeOffline(input, nil)
 		got := encodeStreamingNaive(t, tok, input, chunkSizes)
 
 		if !equalIntSlices(want, got) {

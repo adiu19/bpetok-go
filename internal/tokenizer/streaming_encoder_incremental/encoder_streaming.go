@@ -104,7 +104,7 @@ func (se *StreamingEncoderV2) Flush() []int {
 	}
 
 	if len(buf) > 0 {
-		rem := se.tok.EncodeOffline(buf)
+		rem := se.tok.EncodeOffline(buf, nil)
 		out = append(out, rem...)
 	}
 

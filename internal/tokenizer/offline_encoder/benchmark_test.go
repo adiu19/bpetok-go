@@ -24,7 +24,7 @@ func BenchmarkEncodeOffline(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		_ = tok.EncodeOffline(input)
+		_ = tok.EncodeOffline(input, nil)
 	}
 }
 
