@@ -14,13 +14,6 @@ type NaiveStreamingEncoderState struct {
 
 	buf    []byte
 	outBuf []int
-
-	// optimization flags
-	optPreAllocScratch bool
-	optFlattenLookup   bool
-	optHotLoopTighten  bool
-	optOutBufReuse     bool
-	optNoCopyReturn    bool
 }
 
 // NewNaiveStreamingEncoderState returns a new instance of the encoder state with opt params disabled.
@@ -31,13 +24,15 @@ func NewNaiveStreamingEncoderState(t *core.Tokenizer) *NaiveStreamingEncoderStat
 	}
 
 	return &NaiveStreamingEncoderState{
-		tok:                t,
-		tailReserve:        tail,
-		optPreAllocScratch: false,
-		optFlattenLookup:   false,
-		optHotLoopTighten:  false,
-		optOutBufReuse:     true,
-		optNoCopyReturn:    true,
+		BaseEncoderState: core.BaseEncoderState{
+			OptPreAllocScratch: false,
+			OptFlattenLookup:   false,
+			OptHotLoopTighten:  false,
+			OptOutBufReuse:     true,
+			OptNoCopyReturn:    true,
+		},
+		tok:         t,
+		tailReserve: tail,
 	}
 }
 
@@ -49,16 +44,18 @@ func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch
 	}
 
 	st := NaiveStreamingEncoderState{
-		tok:                t,
-		tailReserve:        tail,
-		optPreAllocScratch: optPreAllocScratch,
-		optFlattenLookup:   optFlattenLookup,
-		optHotLoopTighten:  optHotLoopTighten,
-		optOutBufReuse:     optOutBufReuse,
-		optNoCopyReturn:    optNoCopyReturn,
+		BaseEncoderState: core.BaseEncoderState{
+			OptPreAllocScratch: optPreAllocScratch,
+			OptFlattenLookup:   optFlattenLookup,
+			OptHotLoopTighten:  optHotLoopTighten,
+			OptOutBufReuse:     optOutBufReuse,
+			OptNoCopyReturn:    optNoCopyReturn,
+		},
+		tok:         t,
+		tailReserve: tail,
 	}
 
-	if st.optOutBufReuse {
+	if st.OptOutBufReuse {
 		st.outBuf = make([]int, 64*1024) // 64KB pre-allocated outbut buffer
 	}
 
@@ -67,7 +64,7 @@ func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch
 
 // returnOut returns the output buffer - either copied or via a reference pointer depending on our flags
 func (st *NaiveStreamingEncoderState) returnOut() []int {
-	if st.optNoCopyReturn {
+	if st.OptNoCopyReturn {
 		return st.outBuf
 	}
 

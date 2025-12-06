@@ -5,6 +5,11 @@ import (
 )
 
 type BaseEncoderState struct {
+	OptPreAllocScratch bool
+	OptFlattenLookup   bool
+	OptHotLoopTighten  bool
+	OptOutBufReuse     bool
+	OptNoCopyReturn    bool
 }
 
 func (t *Tokenizer) EncodeOffline(input []byte, state *BaseEncoderState) []int {
