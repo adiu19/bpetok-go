@@ -34,8 +34,8 @@ func NewNaiveStreamingEncoderState(t *core.Tokenizer) *NaiveStreamingEncoderStat
 		optPreAllocScratch: false,
 		optFlattenLookup:   false,
 		optHotLoopTighten:  false,
-		optOutBufReuse:     false,
-		optNoCopyReturn:    false,
+		optOutBufReuse:     true,
+		optNoCopyReturn:    true,
 	}
 }
 
@@ -46,7 +46,7 @@ func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch
 		tail = t.MaxTokenByteLen - 1
 	}
 
-	return &NaiveStreamingEncoderState{
+	st := NaiveStreamingEncoderState{
 		tok:                t,
 		tailReserve:        tail,
 		optPreAllocScratch: optPreAllocScratch,
@@ -55,6 +55,12 @@ func NewNaiveStreamingEncoderStateWithOpts(t *core.Tokenizer, optPreAllocScratch
 		optOutBufReuse:     optOutBufReuse,
 		optNoCopyReturn:    optNoCopyReturn,
 	}
+
+	if st.optOutBufReuse {
+		st.outBuf = make([]int, 64*1024) // 64KB pre-allocated outbut buffer
+	}
+
+	return &st
 }
 
 // returnOut returns the output buffer - either copied or via a reference pointer depending on our flags
@@ -80,7 +86,7 @@ func (st *NaiveStreamingEncoderState) Push(chunk []byte) []int {
 	if len(st.outBuf) == 0 {
 		return nil
 	}
-	return append([]int(nil), st.outBuf...)
+	return st.returnOut()
 }
 
 // Flush encodes whatever bytes remain in the internal buffer.
@@ -95,7 +101,8 @@ func (st *NaiveStreamingEncoderState) Flush() []int {
 	if len(st.outBuf) == 0 {
 		return nil
 	}
-	return append([]int(nil), st.outBuf...)
+
+	return st.returnOut()
 }
 
 func (st *NaiveStreamingEncoderState) emitCommitted() {
