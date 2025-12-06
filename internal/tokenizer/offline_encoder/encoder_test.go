@@ -67,7 +67,7 @@ func TestOfflineEncodePairMergesCollapseToSingleToken_Small(t *testing.T) {
 	N := 2
 	in := strings.Repeat(base, N)
 
-	ids := tok.EncodeOffline([]byte(in, nil))
+	ids := tok.EncodeOffline([]byte(in), nil)
 	if len(ids) == 0 {
 		t.Fatalf("empty encoding for repeated %q", base)
 	}
@@ -126,7 +126,7 @@ func TestOffline_Determinism(t *testing.T) {
 	if out := tok.Decode(a); string(out) != string(in) {
 		t.Fatalf("roundtrip")
 	}
-	c := tok.EncodeOffline(tok.Decode(a, nil))
+	c := tok.EncodeOffline(tok.Decode(a), nil)
 	if fmt.Sprint(a) != fmt.Sprint(c) {
 		t.Fatalf("idempotence broken")
 	}

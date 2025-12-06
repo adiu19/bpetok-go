@@ -1331,7 +1331,7 @@ func TestStreamingE2E_SimpleTwoChunk(t *testing.T) {
 	out = append(out, se.Push([]byte(c2))...)
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(full, nil))
+	want := tok.EncodeOffline([]byte(full), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
@@ -1355,7 +1355,7 @@ func TestStreamingE2E_MultiChunk_NoCrossBoundaryMerges(t *testing.T) {
 	out = append(out, se.Push([]byte(c2))...)
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(full, nil))
+	want := tok.EncodeOffline([]byte(full), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
@@ -1385,7 +1385,7 @@ func TestStreamingE2E_MultiChunk_WithCrossBoundaryMerges(t *testing.T) {
 	}
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(full, nil))
+	want := tok.EncodeOffline([]byte(full), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("streaming mismatch:\ngot  %v\nwant %v", out, want)
@@ -1407,7 +1407,7 @@ func TestStreamingE2E_ByteByByte(t *testing.T) {
 	}
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(input, nil))
+	want := tok.EncodeOffline([]byte(input), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("byte-by-byte mismatch:\ngot  %v\nwant %v", out, want)
@@ -1440,7 +1440,7 @@ func TestStreamingE2E_RandomChunkSplits(t *testing.T) {
 	}
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(input, nil))
+	want := tok.EncodeOffline([]byte(input), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("random-chunk mismatch:\ngot  %v\nwant %v", out, want)
@@ -1462,7 +1462,7 @@ func TestStreamingE2E_SpaceMerges(t *testing.T) {
 	out = append(out, se.Push([]byte(" fox"))...)
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte("The quick brown fox", nil))
+	want := tok.EncodeOffline([]byte("The quick brown fox"), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("space-merge mismatch:\ngot  %v\nwant %v", out, want)
@@ -1484,7 +1484,7 @@ func TestStreamingE2E_UnicodeBoundary(t *testing.T) {
 	out = append(out, se.Push([]byte("🌍"))...)
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(input, nil))
+	want := tok.EncodeOffline([]byte(input), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("unicode-boundary mismatch:\ngot  %v\nwant %v", out, want)
@@ -1500,7 +1500,7 @@ func TestStreamingE2E_FlushOnly(t *testing.T) {
 
 	se.Push([]byte("hello "))
 	got := se.Flush()
-	want := tok.EncodeOffline([]byte("hello ", nil))
+	want := tok.EncodeOffline([]byte("hello "), nil)
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("flush mismatch:\ngot %v\nwant %v", got, want)
@@ -1527,7 +1527,7 @@ func TestStreamingE2E_TailReserveInvariant(t *testing.T) {
 	out = append(out, se.Push([]byte("!"))...)
 	out = append(out, se.Flush()...)
 
-	want := tok.EncodeOffline([]byte(input, nil))
+	want := tok.EncodeOffline([]byte(input), nil)
 
 	if !reflect.DeepEqual(out, want) {
 		t.Fatalf("tail-reserve mismatch:\ngot  %v\nwant %v", out, want)
@@ -1654,7 +1654,7 @@ func TestStreaming_FuzzOfflineEquivalence(t *testing.T) {
 		}
 		out = append(out, se.Flush()...)
 
-		want := tok.EncodeOffline([]byte(s, nil))
+		want := tok.EncodeOffline([]byte(s), nil)
 
 		if !reflect.DeepEqual(out, want) {
 			t.Fatalf("fuzz mismatch:\ninput=%q\ngot  %v\nwant %v", s, out, want)
